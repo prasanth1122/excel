@@ -14,7 +14,7 @@ joblib==1.4.2
 numpy==1.26.4   # ✅ FIXED
 oauthlib==3.2.2
 pandas==2.2.3
-protobuf==5.29.2
+protobuf==4.25.3
 pyasn1==0.6.1
 pydantic_core==2.33.2
 pyparsing==3.2.1
@@ -37,4 +37,5 @@ uritemplate==4.1.1
 urllib3==2.3.0
 uvicorn==0.35.0
 wheel==0.45.1
+
 
