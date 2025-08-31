@@ -343,9 +343,11 @@ if shopify_file:
                     worksheet.set_column(i, i, 12)
 
         return output.getvalue()
+    
+    export_df = df_shopify.drop(columns=["Product Name", "Canonical Product"], errors="ignore")
 
     # ---- DOWNLOAD BUTTONS ----
-    shopify_excel = convert_shopify_to_excel(df_shopify)
+    shopify_excel = convert_shopify_to_excel(export_df)
     st.download_button(
         label="📥 Download Processed Shopify File (Excel)",
         data=shopify_excel,
@@ -368,3 +370,4 @@ if campaign_file:
         file_name="processed_campaigns.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
