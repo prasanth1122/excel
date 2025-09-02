@@ -123,6 +123,14 @@ if shopify_file:
                 total_spend_inr = ad_spend_map[product]
                 ratio = product_df["Net items sold"] / total_items
                 df_shopify.loc[product_df.index, "Ad Spend (INR)"] = total_spend_inr * ratio
+    # ---- FILTER PRODUCTS/VARIANTS WITH NET ITEMS SOLD < 5 ----
+    product_sales = df_shopify.groupby("Product title")["Net items sold"].sum()
+
+    # Keep only products with total >= 5
+    valid_products = product_sales[product_sales >= 5].index
+
+    # Filter Shopify data
+    df_shopify = df_shopify[df_shopify["Product title"].isin(valid_products)].reset_index(drop=True)
 
     # ---- SORT PRODUCTS BY NET ITEMS SOLD (DESC) ----
     product_order = (
@@ -370,4 +378,5 @@ if campaign_file:
         file_name="processed_campaigns.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
 
