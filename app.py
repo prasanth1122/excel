@@ -11,12 +11,71 @@ st.title("📊 Campaign + Shopify Data Processor")
 campaign_file = st.file_uploader("Upload Campaign Data (Excel/CSV)", type=["xlsx", "csv"])
 shopify_file = st.file_uploader("Upload Shopify Data (Excel/CSV)", type=["xlsx", "csv"])
 
-df_campaign, df_shopify = None, None
+# ---- NEW: UPLOAD OLD MERGED DATA ----
+st.subheader("📋 Import Delivery Rates from Previous Data (Optional)")
+old_merged_file = st.file_uploader(
+    "Upload Old Merged Data (Excel/CSV) - to import delivery rates", 
+    type=["xlsx", "csv"],
+    help="Upload your previous merged data file to automatically import delivery rates for matching products"
+)
+
+df_campaign, df_shopify, df_old_merged = None, None, None
 grouped_campaign = None
 
 # ---- USER INPUT FOR RATES ----
 shipping_rate = st.number_input("Shipping Rate per Item", min_value=0, value=77, step=1)
 operational_rate = st.number_input("Operational Cost per Item", min_value=0, value=65, step=1)
+
+# ---- LOAD OLD MERGED DATA ----
+if old_merged_file:
+    try:
+        if old_merged_file.name.endswith(".csv"):
+            df_old_merged = pd.read_csv(old_merged_file)
+        else:
+            df_old_merged = pd.read_excel(old_merged_file)
+        
+        # Check if required columns exist
+        required_old_cols = ["Product title", "Product variant title", "Delivery Rate"]
+        available_old_cols = [col for col in required_old_cols if col in df_old_merged.columns]
+        
+        if len(available_old_cols) == len(required_old_cols):
+            # Process the hierarchical structure of the old merged file
+            # Fill down product titles from "ALL VARIANTS (TOTAL)" rows to variant rows
+            current_product = None
+            for idx, row in df_old_merged.iterrows():
+                if pd.notna(row["Product title"]) and row["Product title"].strip() != "":
+                    if row["Product variant title"] == "ALL VARIANTS (TOTAL)":
+                        # This is a product header row
+                        current_product = row["Product title"]
+                    else:
+                        # This might be a variant row with product title filled
+                        current_product = row["Product title"]
+                else:
+                    # This is a variant row with empty product title - fill it
+                    if current_product:
+                        df_old_merged.loc[idx, "Product title"] = current_product
+            
+            # Filter out summary rows and rows where delivery rate is empty/null
+            df_old_merged = df_old_merged[
+                (df_old_merged["Product variant title"] != "ALL VARIANTS (TOTAL)") &
+                (df_old_merged["Product variant title"] != "ALL PRODUCTS") &
+                (df_old_merged["Delivery Rate"].notna()) & 
+                (df_old_merged["Delivery Rate"] != "")
+            ]
+            
+            # Create normalized versions for matching (case insensitive)
+            df_old_merged["Product title_norm"] = df_old_merged["Product title"].astype(str).str.strip().str.lower()
+            df_old_merged["Product variant title_norm"] = df_old_merged["Product variant title"].astype(str).str.strip().str.lower()
+            
+            st.success(f"✅ Loaded {len(df_old_merged)} records with delivery rates from old merged data")
+            st.write("Preview of old data with delivery rates:")
+            st.write(df_old_merged[["Product title", "Product variant title", "Delivery Rate"]].head())
+        else:
+            st.warning("⚠️ Old merged file doesn't contain required columns: Product title, Product variant title, Delivery Rate")
+            df_old_merged = None
+    except Exception as e:
+        st.error(f"❌ Error reading old merged file: {str(e)}")
+        df_old_merged = None
 
 # ---- CAMPAIGN DATA ----
 if campaign_file:
@@ -96,6 +155,31 @@ if shopify_file:
     df_shopify["Net Profit"] = ""
     df_shopify["Net Profit (%)"] = ""
 
+    # ---- IMPORT DELIVERY RATES FROM OLD DATA ----
+    if df_old_merged is not None:
+        # Create normalized versions for matching (case insensitive)
+        df_shopify["Product title_norm"] = df_shopify["Product title"].astype(str).str.strip().str.lower()
+        df_shopify["Product variant title_norm"] = df_shopify["Product variant title"].astype(str).str.strip().str.lower()
+        
+        # Create a lookup dictionary from old data
+        delivery_rate_lookup = {}
+        for _, row in df_old_merged.iterrows():
+            key = (row["Product title_norm"], row["Product variant title_norm"])
+            delivery_rate_lookup[key] = row["Delivery Rate"]
+        
+        # Match and update delivery rates
+        matched_count = 0
+        for idx, row in df_shopify.iterrows():
+            key = (row["Product title_norm"], row["Product variant title_norm"])
+            if key in delivery_rate_lookup:
+                df_shopify.loc[idx, "Delivery Rate"] = delivery_rate_lookup[key]
+                matched_count += 1
+        
+        # Clean up temporary normalized columns
+        df_shopify = df_shopify.drop(columns=["Product title_norm", "Product variant title_norm"])
+        
+        st.success(f"✅ Successfully imported delivery rates for {matched_count} product variants from old data")
+
     # ---- STEP 3: CLEAN SHOPIFY PRODUCT TITLES TO MATCH CAMPAIGN ----
     df_shopify["Product Name"] = df_shopify["Product title"].astype(str).apply(clean_product_name)
 
@@ -123,6 +207,7 @@ if shopify_file:
                 total_spend_inr = ad_spend_map[product]
                 ratio = product_df["Net items sold"] / total_items
                 df_shopify.loc[product_df.index, "Ad Spend (INR)"] = total_spend_inr * ratio
+    
     # ---- FILTER PRODUCTS/VARIANTS WITH NET ITEMS SOLD < 5 ----
     product_sales = df_shopify.groupby("Product title")["Net items sold"].sum()
 
@@ -144,6 +229,13 @@ if shopify_file:
     df_shopify = df_shopify.sort_values(by=["Product title"]).reset_index(drop=True)
 
     st.subheader("🛒 Shopify Data with Ad Spend (INR) & Extra Columns")
+    
+    # Show delivery rate import summary
+    if df_old_merged is not None:
+        delivery_rate_filled = df_shopify["Delivery Rate"].astype(str).str.strip()
+        delivery_rate_filled = delivery_rate_filled[delivery_rate_filled != ""]
+        st.info(f"📊 Delivery rates imported: {len(delivery_rate_filled)} out of {len(df_shopify)} variants")
+    
     st.write(df_shopify)
 
     # ---- CONVERT SHOPIFY TO EXCEL (STRUCTURED WITH FORMULAS) ----
@@ -271,7 +363,11 @@ if shopify_file:
                             worksheet.write(variant_row_idx, col_idx, variant.get("Product variant price", 0), variant_format)
                         elif col_name == "Ad Spend (INR)":
                             worksheet.write(variant_row_idx, col_idx, variant.get("Ad Spend (INR)", 0.0), variant_format)
-                        elif col_name in ("Delivery Rate", "Product Cost (Input)"):
+                        elif col_name == "Delivery Rate":
+                            # Use the imported delivery rate if available, otherwise leave empty
+                            delivery_rate_val = variant.get("Delivery Rate", "")
+                            worksheet.write(variant_row_idx, col_idx, delivery_rate_val, variant_format)
+                        elif col_name == "Product Cost (Input)":
                             worksheet.write(variant_row_idx, col_idx, "", variant_format)
                         elif col_name == "Delivered Orders":
                             rate_term = f"IF(N({rate_ref})>1, N({rate_ref})/100, N({rate_ref}))"
@@ -378,5 +474,4 @@ if campaign_file:
         file_name="processed_campaigns.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-
 
