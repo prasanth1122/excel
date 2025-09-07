@@ -655,14 +655,23 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
         # ==== Build Columns ====
         columns = [col for col in df.columns if col != "Product"]
         
-        # Add new columns if they don't exist
-        new_columns = ["Average Price", "Net Revenue", "Product Cost (Input)", "Total Product Cost", 
+        # Add new columns if they don't exist (including Cost Per Item)
+        new_columns = ["Cost Per Item", "Average Price", "Net Revenue", "Product Cost (Input)", "Total Product Cost", 
                       "Shipping Cost Per Item", "Total Shipping Cost", "Operational Cost Per Item", 
                       "Total Operational Cost", "Net Profit", "Net Profit (%)"]
         
         for new_col in new_columns:
             if new_col not in columns:
                 columns.append(new_col)
+
+        # Reorder columns to place "Cost Per Item" right after "Purchases"
+        if "Purchases" in columns and "Cost Per Item" in columns:
+            # Remove Cost Per Item from its current position
+            columns.remove("Cost Per Item")
+            # Find the index of Purchases column
+            purchases_index = columns.index("Purchases")
+            # Insert Cost Per Item right after Purchases
+            columns.insert(purchases_index + 1, "Cost Per Item")
 
         for col_num, value in enumerate(columns):
             safe_write(worksheet, 0, col_num, value, header_format)
@@ -673,6 +682,7 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
         amount_usd_col = columns.index("Amount Spent (USD)") if "Amount Spent (USD)" in columns else None
         amount_inr_col = columns.index("Amount Spent (INR)") if "Amount Spent (INR)" in columns else None
         purchases_col = columns.index("Purchases") if "Purchases" in columns else None
+        cost_per_item_col = columns.index("Cost Per Item") if "Cost Per Item" in columns else None
         delivered_col = columns.index("Delivered Orders") if "Delivered Orders" in columns else None
         rate_col = columns.index("Delivery Rate") if "Delivery Rate" in columns else None
         avg_price_col = columns.index("Average Price") if "Average Price" in columns else None
@@ -690,7 +700,7 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
         net_profit_col = columns.index("Net Profit") if "Net Profit" in columns else None
         net_profit_pct_col = columns.index("Net Profit (%)") if "Net Profit (%)" in columns else None
 
-        # Columns to sum (including Net Profit but NOT Net Profit %)
+        # Columns to sum (including Net Profit but NOT Net Profit % or Cost Per Item)
         cols_to_sum = []
         for c in ["Amount Spent (USD)", "Amount Spent (INR)", "Purchases", "Total Shipping Cost", "Total Operational Cost", "Net Profit"]:
             if c in columns:
@@ -700,13 +710,27 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
 
         # ==== Group by product ====
         for product, product_df in df.groupby("Product"):
-            # Sort campaigns by Amount Spent (USD) in increasing order
-            if "Amount Spent (USD)" in product_df.columns:
-                product_df = product_df.sort_values("Amount Spent (USD)", ascending=True)
+            # MODIFIED: Calculate Cost Per Item and sort by it instead of Amount Spent
+            product_df = product_df.copy()  # Make a copy to avoid modifying original
+            
+            # Calculate Cost Per Item for sorting
+            if "Amount Spent (INR)" in product_df.columns and "Purchases" in product_df.columns:
+                # Handle division by zero - campaigns with 0 purchases get infinite cost per item (sorted last)
+                product_df['_temp_cost_per_item'] = product_df.apply(
+                    lambda row: float('inf') if row["Purchases"] == 0 else row["Amount Spent (INR)"] / row["Purchases"], 
+                    axis=1
+                )
+                # Sort by Cost Per Item in increasing order
+                product_df = product_df.sort_values("_temp_cost_per_item", ascending=True)
+                # Remove temporary column
+                product_df = product_df.drop(columns=['_temp_cost_per_item'])
             else:
-                # If USD column doesn't exist, sort by INR as fallback
-                if "Amount Spent (INR)" in product_df.columns:
+                # Fallback to original sorting if required columns don't exist
+                if "Amount Spent (USD)" in product_df.columns:
+                    product_df = product_df.sort_values("Amount Spent (USD)", ascending=True)
+                elif "Amount Spent (INR)" in product_df.columns:
                     product_df = product_df.sort_values("Amount Spent (INR)", ascending=True)
+            
             product_total_row_idx = row
 
             # Product total row
@@ -726,6 +750,16 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                 worksheet.write_formula(
                     product_total_row_idx, col_idx,
                     f"=SUM({col_letter}{excel_first}:{col_letter}{excel_last})",
+                    product_total_format
+                )
+
+            # ==== Cost Per Item calculation for product total ====
+            if cost_per_item_col is not None and amount_inr_col is not None and purchases_col is not None:
+                amount_inr_ref = f"{xl_col_to_name(amount_inr_col)}{product_total_row_idx+1}"
+                purchases_ref = f"{xl_col_to_name(purchases_col)}{product_total_row_idx+1}"
+                worksheet.write_formula(
+                    product_total_row_idx, cost_per_item_col,
+                    f"=IF(N({purchases_ref})=0,0,N({amount_inr_ref})/N({purchases_ref}))",
                     product_total_format
                 )
 
@@ -796,6 +830,17 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
 
                 if purchases_col is not None:
                     safe_write(worksheet, row, purchases_col, campaign.get("Purchases", 0), campaign_format)
+                    
+                    # ==== Cost Per Item calculation for campaign row ====
+                    if cost_per_item_col is not None and amount_inr_col is not None:
+                        amount_inr_ref = f"{xl_col_to_name(amount_inr_col)}{row+1}"
+                        purchases_ref = f"{xl_col_to_name(purchases_col)}{row+1}"
+                        worksheet.write_formula(
+                            row, cost_per_item_col,
+                            f"=IF(N({purchases_ref})=0,0,N({amount_inr_ref})/N({purchases_ref}))",
+                            campaign_format
+                        )
+                    
                     if delivered_col is not None and rate_col is not None:
                         rate_ref = f"{xl_col_to_name(rate_col)}{product_total_row_idx+1}"
                         purch_ref = f"{xl_col_to_name(purchases_col)}{row+1}"
@@ -948,9 +993,19 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                     if purchases_col is not None:
                         safe_write(worksheet, row, purchases_col, missing_campaign.get("Purchases", 0), missing_campaign_format)
                     
+                    # Add Cost Per Item calculation for missing campaigns
+                    if cost_per_item_col is not None and amount_inr_col is not None and purchases_col is not None:
+                        amount_inr_ref = f"{xl_col_to_name(amount_inr_col)}{row+1}"
+                        purchases_ref = f"{xl_col_to_name(purchases_col)}{row+1}"
+                        worksheet.write_formula(
+                            row, cost_per_item_col,
+                            f"=IF(N({purchases_ref})=0,0,N({amount_inr_ref})/N({purchases_ref}))",
+                            missing_campaign_format
+                        )
+                    
                     # Leave other columns empty for missing campaigns
                     for col_idx in range(len(columns)):
-                        if col_idx not in [0, campaign_name_col, amount_usd_col, amount_inr_col, purchases_col]:
+                        if col_idx not in [0, campaign_name_col, amount_usd_col, amount_inr_col, purchases_col, cost_per_item_col]:
                             if col_idx is not None:  # Only write if column exists
                                 safe_write(worksheet, row, col_idx, "", missing_campaign_format)
                     
@@ -962,13 +1017,12 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                 worksheet.set_column(i, i, 35)
             elif col in ["Total Shipping Cost", "Total Operational Cost", "Shipping Cost Per Item", "Operational Cost Per Item"]:
                 worksheet.set_column(i, i, 18)
-            elif col in ["Net Profit", "Net Profit (%)"]:
+            elif col in ["Net Profit", "Net Profit (%)", "Cost Per Item"]:
                 worksheet.set_column(i, i, 15)
             else:
                 worksheet.set_column(i, i, 15)
 
     return output.getvalue()
-
 
 
 # ---- CAMPAIGN DOWNLOAD ----
@@ -1000,4 +1054,3 @@ if campaign_file:
             )
             
             
-
