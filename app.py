@@ -267,14 +267,7 @@ if shopify_file:
                 ratio = product_df["Net items sold"] / total_items
                 df_shopify.loc[product_df.index, "Ad Spend (INR)"] = total_spend_inr * ratio
     
-    # ---- FILTER PRODUCTS/VARIANTS WITH NET ITEMS SOLD < 5 ----
-    product_sales = df_shopify.groupby("Product title")["Net items sold"].sum()
-
-    # Keep only products with total >= 5
-    valid_products = product_sales[product_sales >= 5].index
-
-    # Filter Shopify data
-    df_shopify = df_shopify[df_shopify["Product title"].isin(valid_products)].reset_index(drop=True)
+    
 
     # ---- SORT PRODUCTS BY NET ITEMS SOLD (DESC) ----
     product_order = (
@@ -361,260 +354,259 @@ if df_shopify is not None and not df_shopify.empty:
 
 
 
-    # ---- CONVERT SHOPIFY TO EXCEL (STRUCTURED WITH FORMULAS) ----
-    def convert_shopify_to_excel(df):
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-            workbook = writer.book
-            worksheet = workbook.add_worksheet("Shopify Data")
-            writer.sheets["Shopify Data"] = worksheet
+def convert_shopify_to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        workbook = writer.book
+        worksheet = workbook.add_worksheet("Shopify Data")
+        writer.sheets["Shopify Data"] = worksheet
 
-            # Formats
-            header_format = workbook.add_format({
-                "bold": True, "align": "center", "valign": "vcenter",
-                "fg_color": "#DDD9C4", "font_name": "Calibri", "font_size": 11
-            })
-            grand_total_format = workbook.add_format({
-                "bold": True, "align": "left", "valign": "vcenter",
-                "fg_color": "#FFC000", "font_name": "Calibri", "font_size": 11
-            })
-            product_total_format = workbook.add_format({
-                "bold": True, "align": "left", "valign": "vcenter",
-                "fg_color": "#FFD966", "font_name": "Calibri", "font_size": 11
-            })
-            variant_format = workbook.add_format({
-                "align": "left", "valign": "vcenter",
-                "fg_color": "#D9E1F2", "font_name": "Calibri", "font_size": 11
-            })
+        # Formats
+        header_format = workbook.add_format({
+            "bold": True, "align": "center", "valign": "vcenter",
+            "fg_color": "#DDD9C4", "font_name": "Calibri", "font_size": 11
+        })
+        grand_total_format = workbook.add_format({
+            "bold": True, "align": "left", "valign": "vcenter",
+            "fg_color": "#FFC000", "font_name": "Calibri", "font_size": 11
+        })
+        product_total_format = workbook.add_format({
+            "bold": True, "align": "left", "valign": "vcenter",
+            "fg_color": "#FFD966", "font_name": "Calibri", "font_size": 11
+        })
+        variant_format = workbook.add_format({
+            "align": "left", "valign": "vcenter",
+            "fg_color": "#D9E1F2", "font_name": "Calibri", "font_size": 11
+        })
+        low_sales_product_format = workbook.add_format({
+            "bold": True, "align": "left", "valign": "vcenter",
+            "fg_color": "#F4CCCC", "font_name": "Calibri", "font_size": 11
+        })
+        low_sales_variant_format = workbook.add_format({
+            "align": "left", "valign": "vcenter",
+            "fg_color": "#FCE5CD", "font_name": "Calibri", "font_size": 11
+        })
 
-            # Write header row
-            for col_num, value in enumerate(df.columns.values):
-                worksheet.write(0, col_num, value, header_format)
+        # Header
+        for col_num, value in enumerate(df.columns.values):
+            worksheet.write(0, col_num, value, header_format)
 
-            # determine column indexes once
-            delivered_col = df.columns.get_loc("Delivered Orders")
-            sold_col = df.columns.get_loc("Net items sold")
-            rate_col = df.columns.get_loc("Delivery Rate")
-            revenue_col = df.columns.get_loc("Net Revenue")
-            price_col = df.columns.get_loc("Product variant price")
-            shipping_col = df.columns.get_loc("Shipping Cost")
-            operation_col = df.columns.get_loc("Operational Cost")
-            product_cost_col = df.columns.get_loc("Product Cost (Output)")
-            product_cost_input_col = df.columns.get_loc("Product Cost (Input)")
-            net_profit_col = df.columns.get_loc("Net Profit")
-            ad_spend_col = df.columns.get_loc("Ad Spend (INR)")
-            net_profit_percent_col = df.columns.get_loc("Net Profit (%)")
-            product_title_col = df.columns.get_loc("Product title")
-            variant_title_col = df.columns.get_loc("Product variant title")
+        # Column indexes
+        delivered_col = df.columns.get_loc("Delivered Orders")
+        sold_col = df.columns.get_loc("Net items sold")
+        rate_col = df.columns.get_loc("Delivery Rate")
+        revenue_col = df.columns.get_loc("Net Revenue")
+        price_col = df.columns.get_loc("Product variant price")
+        shipping_col = df.columns.get_loc("Shipping Cost")
+        operation_col = df.columns.get_loc("Operational Cost")
+        product_cost_col = df.columns.get_loc("Product Cost (Output)")
+        product_cost_input_col = df.columns.get_loc("Product Cost (Input)")
+        net_profit_col = df.columns.get_loc("Net Profit")
+        ad_spend_col = df.columns.get_loc("Ad Spend (INR)")
+        net_profit_percent_col = df.columns.get_loc("Net Profit (%)")
+        product_title_col = df.columns.get_loc("Product title")
+        variant_title_col = df.columns.get_loc("Product variant title")
 
-            # numeric columns we sum at product & grand level
-            cols_to_sum = [
-                "Net items sold","Delivered Orders", "Net Revenue", "Ad Spend (INR)",
-                "Shipping Cost", "Operational Cost", "Product Cost (Output)", "Net Profit"
-            ]
-            cols_to_sum_idx = [df.columns.get_loc(c) for c in cols_to_sum]
+        cols_to_sum = [
+            "Net items sold", "Delivered Orders", "Net Revenue", "Ad Spend (INR)",
+            "Shipping Cost", "Operational Cost", "Product Cost (Output)", "Net Profit"
+        ]
+        cols_to_sum_idx = [df.columns.get_loc(c) for c in cols_to_sum]
 
-            # Grand total row index (0-based)
-            grand_total_row_idx = 1
-            worksheet.write(grand_total_row_idx, 0, "GRAND TOTAL", grand_total_format)
-            worksheet.write(grand_total_row_idx, 1, "ALL PRODUCTS", grand_total_format)
+        # Grand total row
+        grand_total_row_idx = 1
+        worksheet.write(grand_total_row_idx, 0, "GRAND TOTAL", grand_total_format)
+        worksheet.write(grand_total_row_idx, 1, "ALL PRODUCTS", grand_total_format)
 
-            # start writing product blocks after grand total row
-            row = grand_total_row_idx + 1
-            product_total_rows = []  # keep track of product total rows
+        row = grand_total_row_idx + 1
+        product_total_rows = []
 
-            # group by product and write structured blocks
-            for product, product_df in df.groupby("Product title"):
-                product_total_row_idx = row
-                product_total_rows.append(product_total_row_idx)
+        # Products
+        for product, product_df in df.groupby("Product title"):
+            total_product_sales = product_df["Net items sold"].sum()
+            is_low_sales = total_product_sales < 5
 
-                # product total row label
-                worksheet.write(product_total_row_idx, 0, product, product_total_format)
-                worksheet.write(product_total_row_idx, 1, "ALL VARIANTS (TOTAL)", product_total_format)
+            p_format = low_sales_product_format if is_low_sales else product_total_format
+            v_format = low_sales_variant_format if is_low_sales else variant_format
 
-                n_variants = len(product_df)
-                first_variant_row_idx = product_total_row_idx + 1
-                last_variant_row_idx = product_total_row_idx + n_variants
+            product_total_row_idx = row
+            product_total_rows.append(product_total_row_idx)
 
-                # write product-level SUM formulas for numeric columns
-                for col_idx in cols_to_sum_idx:
-                    col_letter = xl_col_to_name(col_idx)
-                    excel_first = first_variant_row_idx + 1
-                    excel_last = last_variant_row_idx + 1
-                    worksheet.write_formula(
-                        product_total_row_idx, col_idx,
-                        f"=SUM({col_letter}{excel_first}:{col_letter}{excel_last})",
-                        product_total_format
-                    )
-                
-                # ✅ FIXED: Product-level Net Delivery Rate (Weighted Average)
-                sold_col_letter = xl_col_to_name(sold_col)
-                rate_col_letter = xl_col_to_name(rate_col)
+            worksheet.write(product_total_row_idx, 0, product, p_format)
+            worksheet.write(product_total_row_idx, 1, "ALL VARIANTS (TOTAL)", p_format)
+
+            n_variants = len(product_df)
+            first_variant_row_idx = product_total_row_idx + 1
+            last_variant_row_idx = product_total_row_idx + n_variants
+
+            # Product SUMs
+            for col_idx in cols_to_sum_idx:
+                col_letter = xl_col_to_name(col_idx)
                 excel_first = first_variant_row_idx + 1
                 excel_last = last_variant_row_idx + 1
-                
-                # Calculate weighted average: SUMPRODUCT(Rate×Items) ÷ SUM(Items)
                 worksheet.write_formula(
-                    product_total_row_idx, rate_col,
-                    f"=IF(SUM({sold_col_letter}{excel_first}:{sold_col_letter}{excel_last})=0,0,"
-                    f"SUMPRODUCT({rate_col_letter}{excel_first}:{rate_col_letter}{excel_last},"
-                    f"{sold_col_letter}{excel_first}:{sold_col_letter}{excel_last})/"
-                    f"SUM({sold_col_letter}{excel_first}:{sold_col_letter}{excel_last}))",
-                    product_total_format
+                    product_total_row_idx, col_idx,
+                    f"=SUM({col_letter}{excel_first}:{col_letter}{excel_last})",
+                    p_format
                 )
 
-                # product-level Net Profit % formula
-                rev_col_letter = xl_col_to_name(revenue_col)
-                np_col_letter = xl_col_to_name(net_profit_col)
-                excel_row = product_total_row_idx + 1
-                worksheet.write_formula(
-                    product_total_row_idx, net_profit_percent_col,
-                    f"=IF(N({rev_col_letter}{excel_row})=0,0,N({np_col_letter}{excel_row})/N({rev_col_letter}{excel_row})*100)",
-                    product_total_format
-                )
-                # ✅ Write weighted avg product price into TOTAL row
-                if product in avg_price_lookup:
-                      worksheet.write(product_total_row_idx, price_col, avg_price_lookup[product], product_total_format)
+            # Product weighted avg Delivery Rate
+            sold_col_letter = xl_col_to_name(sold_col)
+            rate_col_letter = xl_col_to_name(rate_col)
+            excel_first = first_variant_row_idx + 1
+            excel_last = last_variant_row_idx + 1
+            worksheet.write_formula(
+                product_total_row_idx, rate_col,
+                f"=IF(SUM({sold_col_letter}{excel_first}:{sold_col_letter}{excel_last})=0,0,"
+                f"SUMPRODUCT({rate_col_letter}{excel_first}:{rate_col_letter}{excel_last},"
+                f"{sold_col_letter}{excel_first}:{sold_col_letter}{excel_last})/"
+                f"SUM({sold_col_letter}{excel_first}:{sold_col_letter}{excel_last}))",
+                p_format
+            )
 
-                # write variant rows
-                row += 1
-                for _, variant in product_df.iterrows():
-                    variant_row_idx = row
-                    excel_row = variant_row_idx + 1
+            # Product Net Profit %
+            rev_col_letter = xl_col_to_name(revenue_col)
+            np_col_letter = xl_col_to_name(net_profit_col)
+            excel_row = product_total_row_idx + 1
+            worksheet.write_formula(
+                product_total_row_idx, net_profit_percent_col,
+                f"=IF(N({rev_col_letter}{excel_row})=0,0,"
+                f"N({np_col_letter}{excel_row})/N({rev_col_letter}{excel_row})*100)",
+                p_format
+            )
 
-                    sold_ref = f"{xl_col_to_name(sold_col)}{excel_row}"
-                    rate_ref = f"{xl_col_to_name(rate_col)}{excel_row}"
-                    delivered_ref = f"{xl_col_to_name(delivered_col)}{excel_row}"
-                    price_ref = f"{xl_col_to_name(price_col)}{excel_row}"
-                    pc_input_ref = f"{xl_col_to_name(product_cost_input_col)}{excel_row}"
-                    ad_spend_ref = f"{xl_col_to_name(ad_spend_col)}{excel_row}"
-                    shipping_ref = f"{xl_col_to_name(shipping_col)}{excel_row}"
-                    op_ref = f"{xl_col_to_name(operation_col)}{excel_row}"
-                    pc_output_ref = f"{xl_col_to_name(product_cost_col)}{excel_row}"
-                    net_profit_ref = f"{xl_col_to_name(net_profit_col)}{excel_row}"
-                    revenue_ref = f"{xl_col_to_name(revenue_col)}{excel_row}"
+            if product in avg_price_lookup:
+                worksheet.write(product_total_row_idx, price_col, avg_price_lookup[product], p_format)
 
-                    for col_idx, col_name in enumerate(df.columns):
-                        if col_idx == product_title_col:
-                            worksheet.write(variant_row_idx, col_idx, "", variant_format)
-                        elif col_idx == variant_title_col:
-                            worksheet.write(variant_row_idx, col_idx, variant.get("Product variant title", ""), variant_format)
-                        elif col_name == "Net items sold":
-                            worksheet.write(variant_row_idx, col_idx, variant.get("Net items sold", 0), variant_format)
-                        elif col_name == "Product variant price":
-                            worksheet.write(variant_row_idx, col_idx, variant.get("Product variant price", 0), variant_format)
-                        elif col_name == "Ad Spend (INR)":
-                            worksheet.write(variant_row_idx, col_idx, variant.get("Ad Spend (INR)", 0.0), variant_format)
-                        elif col_name == "Delivery Rate":
-                            # Use the imported delivery rate if available, otherwise leave empty
-                            delivery_rate_val = variant.get("Delivery Rate", "")
-                            worksheet.write(variant_row_idx, col_idx, delivery_rate_val, variant_format)
-                        elif col_name == "Product Cost (Input)":
-                            # Use the imported product cost if available, otherwise leave empty
-                            product_cost_val = variant.get("Product Cost (Input)", "")
-                            worksheet.write(variant_row_idx, col_idx, product_cost_val, variant_format)
-                        elif col_name == "Delivered Orders":
-                            rate_term = f"IF(N({rate_ref})>1, N({rate_ref})/100, N({rate_ref}))"
-                            worksheet.write_formula(
+            # Variants
+            row += 1
+            for _, variant in product_df.iterrows():
+                variant_row_idx = row
+                excel_row = variant_row_idx + 1
+
+                sold_ref = f"{xl_col_to_name(sold_col)}{excel_row}"
+                rate_ref = f"{xl_col_to_name(rate_col)}{excel_row}"
+                delivered_ref = f"{xl_col_to_name(delivered_col)}{excel_row}"
+                price_ref = f"{xl_col_to_name(price_col)}{excel_row}"
+                pc_input_ref = f"{xl_col_to_name(product_cost_input_col)}{excel_row}"
+                ad_spend_ref = f"{xl_col_to_name(ad_spend_col)}{excel_row}"
+                shipping_ref = f"{xl_col_to_name(shipping_col)}{excel_row}"
+                op_ref = f"{xl_col_to_name(operation_col)}{excel_row}"
+                pc_output_ref = f"{xl_col_to_name(product_cost_col)}{excel_row}"
+                net_profit_ref = f"{xl_col_to_name(net_profit_col)}{excel_row}"
+                revenue_ref = f"{xl_col_to_name(revenue_col)}{excel_row}"
+
+                for col_idx, col_name in enumerate(df.columns):
+                    if col_idx == product_title_col:
+                        worksheet.write(variant_row_idx, col_idx, "", v_format)
+                    elif col_idx == variant_title_col:
+                        worksheet.write(variant_row_idx, col_idx, variant.get("Product variant title", ""), v_format)
+                    elif col_name == "Net items sold":
+                        worksheet.write(variant_row_idx, col_idx, variant.get("Net items sold", 0), v_format)
+                    elif col_name == "Product variant price":
+                        worksheet.write(variant_row_idx, col_idx, variant.get("Product variant price", 0), v_format)
+                    elif col_name == "Ad Spend (INR)":
+                        worksheet.write(variant_row_idx, col_idx, variant.get("Ad Spend (INR)", 0.0), v_format)
+                    elif col_name == "Delivery Rate":
+                        worksheet.write(variant_row_idx, col_idx, variant.get("Delivery Rate", ""), v_format)
+                    elif col_name == "Product Cost (Input)":
+                        worksheet.write(variant_row_idx, col_idx, variant.get("Product Cost (Input)", ""), v_format)
+                    elif col_name == "Delivered Orders":
+                        rate_term = f"IF(N({rate_ref})>1,N({rate_ref})/100,N({rate_ref}))"
+                        worksheet.write_formula(
                             variant_row_idx, col_idx,
                             f"=ROUND(N({sold_ref})*{rate_term},1)",
-                            variant_format
-                            )
+                            v_format
+                        )
+                    elif col_name == "Net Revenue":
+                        worksheet.write_formula(
+                            variant_row_idx, col_idx,
+                            f"=N({price_ref})*N({delivered_ref})",
+                            v_format
+                        )
+                    elif col_name == "Shipping Cost":
+                        worksheet.write_formula(
+                            variant_row_idx, col_idx,
+                            f"={shipping_rate}*N({sold_ref})",
+                            v_format
+                        )
+                    elif col_name == "Operational Cost":
+                        worksheet.write_formula(
+                            variant_row_idx, col_idx,
+                            f"={operational_rate}*N({sold_ref})",
+                            v_format
+                        )
+                    elif col_name == "Product Cost (Output)":
+                        worksheet.write_formula(
+                            variant_row_idx, col_idx,
+                            f"=N({pc_input_ref})*N({delivered_ref})",
+                            v_format
+                        )
+                    elif col_name == "Net Profit":
+                        worksheet.write_formula(
+                            variant_row_idx, col_idx,
+                            f"=N({revenue_ref})-N({ad_spend_ref})-N({shipping_ref})-N({pc_output_ref})-N({op_ref})",
+                            v_format
+                        )
+                    elif col_name == "Net Profit (%)":
+                        worksheet.write_formula(
+                            variant_row_idx, col_idx,
+                            f"=IF(N({revenue_ref})=0,0,N({net_profit_ref})/N({revenue_ref})*100)",
+                            v_format
+                        )
+                    else:
+                        worksheet.write(variant_row_idx, col_idx, variant.get(col_name, ""), v_format)
+                row += 1
 
-                        elif col_name == "Net Revenue":
-                            worksheet.write_formula(
-                                variant_row_idx, col_idx,
-                                f"=N({price_ref})*N({delivered_ref})",
-                                variant_format
-                            )
-                        elif col_name == "Shipping Cost":
-                            worksheet.write_formula(
-                                variant_row_idx, col_idx,
-                                f"={shipping_rate}*N({sold_ref})",
-                                variant_format
-                            )
-                        elif col_name == "Operational Cost":
-                            worksheet.write_formula(
-                                variant_row_idx, col_idx,
-                                f"={operational_rate}*N({sold_ref})",
-                                variant_format
-                            )
-                        elif col_name == "Product Cost (Output)":
-                            worksheet.write_formula(
-                                variant_row_idx, col_idx,
-                                f"=N({pc_input_ref})*N({delivered_ref})",
-                                variant_format
-                            )
-                        elif col_name == "Net Profit":
-                            worksheet.write_formula(
-                                variant_row_idx, col_idx,
-                                f"=N({revenue_ref})-N({ad_spend_ref})-N({shipping_ref})-N({pc_output_ref})-N({op_ref})",
-                                variant_format
-                            )
-                        elif col_name == "Net Profit (%)":
-                            worksheet.write_formula(
-                                variant_row_idx, col_idx,
-                                f"=IF(N({revenue_ref})=0,0,N({net_profit_ref})/N({revenue_ref})*100)",
-                                variant_format
-                            )
-                        else:
-                            worksheet.write(variant_row_idx, col_idx, variant.get(col_name, ""), variant_format)
-                    row += 1
-
-            # ---- GRAND TOTAL = sum of product total rows ----
-            if product_total_rows:
-                for col_idx in cols_to_sum_idx:
-                    col_letter = xl_col_to_name(col_idx)
-                    total_refs = [f"{col_letter}{r+1}" for r in product_total_rows]
-                    formula = f"=SUM({','.join(total_refs)})"
-                    worksheet.write_formula(
-                        grand_total_row_idx, col_idx,
-                        formula,
-                        grand_total_format
-                    )
-                
-                # ✅ FIXED: Grand Total Delivery Rate (Weighted Average)
-                sold_col_letter = xl_col_to_name(sold_col)
-                rate_col_letter = xl_col_to_name(rate_col)
-                product_refs_sold = [f"{sold_col_letter}{r+1}" for r in product_total_rows]
-                product_refs_rate = [f"{rate_col_letter}{r+1}" for r in product_total_rows]
-                
-                # Grand total uses product totals (which are already in percentage format)
+        # Grand total = sum of product totals
+        if product_total_rows:
+            for col_idx in cols_to_sum_idx:
+                col_letter = xl_col_to_name(col_idx)
+                total_refs = [f"{col_letter}{r+1}" for r in product_total_rows]
                 worksheet.write_formula(
-                    grand_total_row_idx, rate_col,
-                    f"=IF(SUM({','.join(product_refs_sold)})=0,0,"
-                    f"SUMPRODUCT({','.join(product_refs_rate)},{','.join(product_refs_sold)})/"
-                    f"SUM({','.join(product_refs_sold)}))",
+                    grand_total_row_idx, col_idx,
+                    f"=SUM({','.join(total_refs)})",
                     grand_total_format
                 )
-                
-                # grand total Net Profit %
-                rev_col_letter = xl_col_to_name(revenue_col)
-                np_col_letter = xl_col_to_name(net_profit_col)
-                excel_row = grand_total_row_idx + 1
-                worksheet.write_formula(
-                    grand_total_row_idx, net_profit_percent_col,
-                    f"=IF(N({rev_col_letter}{excel_row})=0,0,N({np_col_letter}{excel_row})/N({rev_col_letter}{excel_row})*100)",
-                    grand_total_format
-                )
-                 
 
-            worksheet.freeze_panes(2, 0)
-            for i, col in enumerate(df.columns):
-                if col in ("Product title", "Product variant title"):
-                    worksheet.set_column(i, i, 35)
-                elif col in ("Product variant price", "Net Revenue", "Ad Spend (INR)", "Shipping Cost", "Operational Cost", "Net Profit"):
-                    worksheet.set_column(i, i, 15)
-                else:
-                    worksheet.set_column(i, i, 12)
+            sold_col_letter = xl_col_to_name(sold_col)
+            rate_col_letter = xl_col_to_name(rate_col)
+            product_refs_sold = [f"{sold_col_letter}{r+1}" for r in product_total_rows]
+            product_refs_rate = [f"{rate_col_letter}{r+1}" for r in product_total_rows]
+            worksheet.write_formula(
+                grand_total_row_idx, rate_col,
+                f"=IF(SUM({','.join(product_refs_sold)})=0,0,"
+                f"SUMPRODUCT({','.join(product_refs_rate)},{','.join(product_refs_sold)})/"
+                f"SUM({','.join(product_refs_sold)}))",
+                grand_total_format
+            )
 
-        return output.getvalue()
+            rev_col_letter = xl_col_to_name(revenue_col)
+            np_col_letter = xl_col_to_name(net_profit_col)
+            excel_row = grand_total_row_idx + 1
+            worksheet.write_formula(
+                grand_total_row_idx, net_profit_percent_col,
+                f"=IF(N({rev_col_letter}{excel_row})=0,0,N({np_col_letter}{excel_row})/N({rev_col_letter}{excel_row})*100)",
+                grand_total_format
+            )
+
+        worksheet.freeze_panes(2, 0)
+        for i, col in enumerate(df.columns):
+            if col in ("Product title", "Product variant title"):
+                worksheet.set_column(i, i, 35)
+            elif col in ("Product variant price", "Net Revenue", "Ad Spend (INR)", "Shipping Cost", "Operational Cost", "Net Profit"):
+                worksheet.set_column(i, i, 15)
+            else:
+                worksheet.set_column(i, i, 12)
+
+    return output.getvalue()
+
     
-    export_df = df_shopify.drop(columns=["Product Name", "Canonical Product"], errors="ignore")
+export_df = df_shopify.drop(columns=["Product Name", "Canonical Product"], errors="ignore")
 
     # ---- DOWNLOAD BUTTONS ----
-    shopify_excel = convert_shopify_to_excel(export_df)
-    st.download_button(
+shopify_excel = convert_shopify_to_excel(export_df)
+st.download_button(
         label="📥 Download Processed Shopify File (Excel)",
         data=shopify_excel,
         file_name="processed_shopify.xlsx",
@@ -639,18 +631,20 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
         })
         product_total_format = workbook.add_format({
             "bold": True, "align": "left", "valign": "vcenter",
-            "fg_color": "#FFD966", "font_name": "Calibri", "font_size": 11
+            "fg_color": "#FFD966", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00"  # 2 decimal places
         })
         campaign_format = workbook.add_format({
             "align": "left", "valign": "vcenter",
-            "fg_color": "#D9E1F2", "font_name": "Calibri", "font_size": 11
+            "fg_color": "#D9E1F2", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00"  # 2 decimal places
         })
 
         # ==== Build Columns ====
         columns = [col for col in df.columns if col != "Product"]
         
-        # Add new columns if they don't exist (including Cost Per Item)
-        new_columns = ["Cost Per Item", "Average Price", "Net Revenue", "Product Cost (Input)", "Total Product Cost", 
+        # Add new columns if they don't exist (including renamed Cost Per Purchase columns)
+        new_columns = ["Cost Per Purchase (INR)", "Cost Per Purchase (USD)", "Average Price", "Net Revenue", "Product Cost (Input)", "Total Product Cost", 
                       "Shipping Cost Per Item", "Total Shipping Cost", "Operational Cost Per Item", 
                       "Total Operational Cost", "Net Profit", "Net Profit (%)"]
         
@@ -658,14 +652,23 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
             if new_col not in columns:
                 columns.append(new_col)
 
-        # Reorder columns to place "Cost Per Item" right after "Purchases"
-        if "Purchases" in columns and "Cost Per Item" in columns:
-            # Remove Cost Per Item from its current position
+        # Remove old "Cost Per Item" column if it exists
+        if "Cost Per Item" in columns:
             columns.remove("Cost Per Item")
-            # Find the index of Purchases column
+
+        # Reorder columns to place cost per purchase columns right after "Purchases"
+        if "Purchases" in columns:
             purchases_index = columns.index("Purchases")
-            # Insert Cost Per Item right after Purchases
-            columns.insert(purchases_index + 1, "Cost Per Item")
+            
+            # Remove cost per purchase columns from their current positions
+            if "Cost Per Purchase (INR)" in columns:
+                columns.remove("Cost Per Purchase (INR)")
+            if "Cost Per Purchase (USD)" in columns:
+                columns.remove("Cost Per Purchase (USD)")
+            
+            # Insert both cost per purchase columns after Purchases
+            columns.insert(purchases_index + 1, "Cost Per Purchase (INR)")
+            columns.insert(purchases_index + 2, "Cost Per Purchase (USD)")
 
         for col_num, value in enumerate(columns):
             safe_write(worksheet, 0, col_num, value, header_format)
@@ -676,7 +679,8 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
         amount_usd_col = columns.index("Amount Spent (USD)") if "Amount Spent (USD)" in columns else None
         amount_inr_col = columns.index("Amount Spent (INR)") if "Amount Spent (INR)" in columns else None
         purchases_col = columns.index("Purchases") if "Purchases" in columns else None
-        cost_per_item_col = columns.index("Cost Per Item") if "Cost Per Item" in columns else None
+        cost_per_purchase_inr_col = columns.index("Cost Per Purchase (INR)") if "Cost Per Purchase (INR)" in columns else None
+        cost_per_purchase_usd_col = columns.index("Cost Per Purchase (USD)") if "Cost Per Purchase (USD)" in columns else None
         delivered_col = columns.index("Delivered Orders") if "Delivered Orders" in columns else None
         rate_col = columns.index("Delivery Rate") if "Delivery Rate" in columns else None
         avg_price_col = columns.index("Average Price") if "Average Price" in columns else None
@@ -694,7 +698,7 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
         net_profit_col = columns.index("Net Profit") if "Net Profit" in columns else None
         net_profit_pct_col = columns.index("Net Profit (%)") if "Net Profit (%)" in columns else None
 
-        # Columns to sum (including Net Profit but NOT Net Profit % or Cost Per Item)
+        # Columns to sum (including Net Profit but NOT Net Profit % or Cost Per Purchase columns)
         cols_to_sum = []
         for c in ["Amount Spent (USD)", "Amount Spent (INR)", "Purchases", "Total Shipping Cost", "Total Operational Cost", "Net Profit"]:
             if c in columns:
@@ -713,20 +717,20 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                               product in avg_price_lookup or 
                               product in avg_product_cost_lookup)
             
-            # MODIFIED: Calculate Cost Per Item and sort by it instead of Amount Spent
+            # MODIFIED: Calculate Cost Per Purchase (INR) and sort by it instead of Amount Spent
             product_df = product_df.copy()  # Make a copy to avoid modifying original
             
-            # Calculate Cost Per Item for sorting
+            # Calculate Cost Per Purchase (INR) for sorting
             if "Amount Spent (INR)" in product_df.columns and "Purchases" in product_df.columns:
-                # Handle division by zero - campaigns with 0 purchases get infinite cost per item (sorted last)
-                product_df['_temp_cost_per_item'] = product_df.apply(
+                # Handle division by zero - campaigns with 0 purchases get infinite cost per purchase (sorted last)
+                product_df['_temp_cost_per_purchase'] = product_df.apply(
                     lambda row: float('inf') if row["Purchases"] == 0 else row["Amount Spent (INR)"] / row["Purchases"], 
                     axis=1
                 )
-                # Sort by Cost Per Item in increasing order
-                product_df = product_df.sort_values("_temp_cost_per_item", ascending=True)
+                # Sort by Cost Per Purchase (INR) in increasing order
+                product_df = product_df.sort_values("_temp_cost_per_purchase", ascending=True)
                 # Remove temporary column
-                product_df = product_df.drop(columns=['_temp_cost_per_item'])
+                product_df = product_df.drop(columns=['_temp_cost_per_purchase'])
             else:
                 # Fallback to original sorting if required columns don't exist
                 if "Amount Spent (USD)" in product_df.columns:
@@ -739,8 +743,8 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                 campaign_info = {
                     'Product': str(product) if pd.notna(product) else '',
                     'Campaign Name': str(campaign_row.get('Campaign Name', '')) if pd.notna(campaign_row.get('Campaign Name', '')) else '',
-                    'Amount Spent (USD)': float(campaign_row.get('Amount Spent (USD)', 0)) if pd.notna(campaign_row.get('Amount Spent (USD)', 0)) else 0.0,
-                    'Amount Spent (INR)': float(campaign_row.get('Amount Spent (INR)', 0)) if pd.notna(campaign_row.get('Amount Spent (INR)', 0)) else 0.0,
+                    'Amount Spent (USD)': round(float(campaign_row.get('Amount Spent (USD)', 0)), 2) if pd.notna(campaign_row.get('Amount Spent (USD)', 0)) else 0.0,
+                    'Amount Spent (INR)': round(float(campaign_row.get('Amount Spent (INR)', 0)), 2) if pd.notna(campaign_row.get('Amount Spent (INR)', 0)) else 0.0,
                     'Purchases': int(campaign_row.get('Purchases', 0)) if pd.notna(campaign_row.get('Purchases', 0)) else 0,
                     'Has Shopify Data': has_shopify_data
                 }
@@ -768,41 +772,50 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                 excel_last = last_campaign_row_idx + 1
                 worksheet.write_formula(
                     product_total_row_idx, col_idx,
-                    f"=SUM({col_letter}{excel_first}:{col_letter}{excel_last})",
+                    f"=ROUND(SUM({col_letter}{excel_first}:{col_letter}{excel_last}),2)",
                     product_total_format
                 )
 
-            # ==== Cost Per Item calculation for product total ====
-            if cost_per_item_col is not None and amount_inr_col is not None and purchases_col is not None:
+            # ==== Cost Per Purchase calculations for product total ====
+            if cost_per_purchase_inr_col is not None and amount_inr_col is not None and purchases_col is not None:
                 amount_inr_ref = f"{xl_col_to_name(amount_inr_col)}{product_total_row_idx+1}"
                 purchases_ref = f"{xl_col_to_name(purchases_col)}{product_total_row_idx+1}"
                 worksheet.write_formula(
-                    product_total_row_idx, cost_per_item_col,
-                    f"=IF(N({purchases_ref})=0,0,N({amount_inr_ref})/N({purchases_ref}))",
+                    product_total_row_idx, cost_per_purchase_inr_col,
+                    f"=IF(N({purchases_ref})=0,0,ROUND(N({amount_inr_ref})/N({purchases_ref}),2))",
+                    product_total_format
+                )
+
+            if cost_per_purchase_usd_col is not None and amount_usd_col is not None and purchases_col is not None:
+                amount_usd_ref = f"{xl_col_to_name(amount_usd_col)}{product_total_row_idx+1}"
+                purchases_ref = f"{xl_col_to_name(purchases_col)}{product_total_row_idx+1}"
+                worksheet.write_formula(
+                    product_total_row_idx, cost_per_purchase_usd_col,
+                    f"=IF(N({purchases_ref})=0,0,ROUND(N({amount_usd_ref})/N({purchases_ref}),2))",
                     product_total_format
                 )
 
             # ==== Shopify totals injection ====
             if delivered_col is not None and product in shopify_totals:
-                safe_write(worksheet, product_total_row_idx, delivered_col, shopify_totals[product]["Delivered Orders"], product_total_format)
+                safe_write(worksheet, product_total_row_idx, delivered_col, round(shopify_totals[product]["Delivered Orders"], 2), product_total_format)
             if rate_col is not None and product in shopify_totals:
-                safe_write(worksheet, product_total_row_idx, rate_col, shopify_totals[product]["Delivery Rate"], product_total_format)
+                safe_write(worksheet, product_total_row_idx, rate_col, round(shopify_totals[product]["Delivery Rate"], 2), product_total_format)
 
             if avg_price_col is not None and product in avg_price_lookup:
-                safe_write(worksheet, product_total_row_idx, avg_price_col, avg_price_lookup[product], product_total_format)
+                safe_write(worksheet, product_total_row_idx, avg_price_col, round(avg_price_lookup[product], 2), product_total_format)
                 if net_rev_col is not None and delivered_col is not None:
                     deliv_ref = f"{xl_col_to_name(delivered_col)}{product_total_row_idx+1}"
                     avg_price_ref = f"{xl_col_to_name(avg_price_col)}{product_total_row_idx+1}"
                     worksheet.write_formula(
                         product_total_row_idx, net_rev_col,
-                        f"=N({deliv_ref})*N({avg_price_ref})",
+                        f"=ROUND(N({deliv_ref})*N({avg_price_ref}),2)",
                         product_total_format
                     )
 
             if prod_cost_input_col is not None and product in avg_product_cost_lookup:
                 safe_write(
                     worksheet, product_total_row_idx, prod_cost_input_col,
-                    avg_product_cost_lookup[product],
+                    round(avg_product_cost_lookup[product], 2),
                     product_total_format
                 )
 
@@ -813,25 +826,24 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                 excel_last = last_campaign_row_idx + 1
                 worksheet.write_formula(
                     product_total_row_idx, total_prod_cost_col,
-                    f"=SUM({col_letter}{excel_first}:{col_letter}{excel_last})",
+                    f"=ROUND(SUM({col_letter}{excel_first}:{col_letter}{excel_last}),2)",
                     product_total_format
                 )
 
             # ==== Add constant values for shipping and operational costs (per item) ====
             if shipping_per_item_col is not None:
-                safe_write(worksheet, product_total_row_idx, shipping_per_item_col, shipping_rate, product_total_format)
+                safe_write(worksheet, product_total_row_idx, shipping_per_item_col, round(shipping_rate, 2), product_total_format)
             
             if operational_per_item_col is not None:
-                safe_write(worksheet, product_total_row_idx, operational_per_item_col, operational_rate, product_total_format)
+                safe_write(worksheet, product_total_row_idx, operational_per_item_col, round(operational_rate, 2), product_total_format)
 
-            # ==== NEW: Product total Net Profit (%) calculation ====
-            # Calculate Net Profit (%) for product total using the formula, don't sum from campaigns
+            # ==== Product total Net Profit (%) calculation ====
             if net_profit_pct_col is not None and net_profit_col is not None and net_rev_col is not None:
                 net_profit_ref = f"{xl_col_to_name(net_profit_col)}{product_total_row_idx+1}"
                 net_rev_ref = f"{xl_col_to_name(net_rev_col)}{product_total_row_idx+1}"
                 worksheet.write_formula(
                     product_total_row_idx, net_profit_pct_col,
-                    f"=IF(N({net_rev_ref})=0,0,N({net_profit_ref})/N({net_rev_ref})*100)",
+                    f"=IF(N({net_rev_ref})=0,0,ROUND(N({net_profit_ref})/N({net_rev_ref})*100,2))",
                     product_total_format
                 )
 
@@ -843,20 +855,29 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                 if campaign_name_col is not None:
                     safe_write(worksheet, row, campaign_name_col, campaign.get("Campaign Name", ""), campaign_format)
                 if amount_usd_col is not None:
-                    safe_write(worksheet, row, amount_usd_col, campaign.get("Amount Spent (USD)", 0), campaign_format)
+                    safe_write(worksheet, row, amount_usd_col, round(campaign.get("Amount Spent (USD)", 0), 2), campaign_format)
                 if amount_inr_col is not None:
-                    safe_write(worksheet, row, amount_inr_col, campaign.get("Amount Spent (INR)", 0), campaign_format)
+                    safe_write(worksheet, row, amount_inr_col, round(campaign.get("Amount Spent (INR)", 0), 2), campaign_format)
 
                 if purchases_col is not None:
                     safe_write(worksheet, row, purchases_col, campaign.get("Purchases", 0), campaign_format)
                     
-                    # ==== Cost Per Item calculation for campaign row ====
-                    if cost_per_item_col is not None and amount_inr_col is not None:
+                    # ==== Cost Per Purchase calculations for campaign row ====
+                    if cost_per_purchase_inr_col is not None and amount_inr_col is not None:
                         amount_inr_ref = f"{xl_col_to_name(amount_inr_col)}{row+1}"
                         purchases_ref = f"{xl_col_to_name(purchases_col)}{row+1}"
                         worksheet.write_formula(
-                            row, cost_per_item_col,
-                            f"=IF(N({purchases_ref})=0,0,N({amount_inr_ref})/N({purchases_ref}))",
+                            row, cost_per_purchase_inr_col,
+                            f"=IF(N({purchases_ref})=0,0,ROUND(N({amount_inr_ref})/N({purchases_ref}),2))",
+                            campaign_format
+                        )
+
+                    if cost_per_purchase_usd_col is not None and amount_usd_col is not None:
+                        amount_usd_ref = f"{xl_col_to_name(amount_usd_col)}{row+1}"
+                        purchases_ref = f"{xl_col_to_name(purchases_col)}{row+1}"
+                        worksheet.write_formula(
+                            row, cost_per_purchase_usd_col,
+                            f"=IF(N({purchases_ref})=0,0,ROUND(N({amount_usd_ref})/N({purchases_ref}),2))",
                             campaign_format
                         )
                     
@@ -865,7 +886,7 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                         purch_ref = f"{xl_col_to_name(purchases_col)}{row+1}"
                         worksheet.write_formula(
                             row, delivered_col,
-                            f"=N({purch_ref})*N({rate_ref})",
+                            f"=ROUND(N({purch_ref})*N({rate_ref}),2)",
                             campaign_format
                         )
 
@@ -873,20 +894,20 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                     safe_write(worksheet, row, rate_col, "", campaign_format)
 
                 if avg_price_col is not None and product in avg_price_lookup:
-                    safe_write(worksheet, row, avg_price_col, avg_price_lookup[product], campaign_format)
+                    safe_write(worksheet, row, avg_price_col, round(avg_price_lookup[product], 2), campaign_format)
                     if net_rev_col is not None and delivered_col is not None:
                         deliv_ref = f"{xl_col_to_name(delivered_col)}{row+1}"
                         avg_price_ref = f"{xl_col_to_name(avg_price_col)}{row+1}"
                         worksheet.write_formula(
                             row, net_rev_col,
-                            f"=N({deliv_ref})*N({avg_price_ref})",
+                            f"=ROUND(N({deliv_ref})*N({avg_price_ref}),2)",
                             campaign_format
                         )
 
                 if prod_cost_input_col is not None and product in avg_product_cost_lookup:
                     safe_write(
                         worksheet, row, prod_cost_input_col,
-                        avg_product_cost_lookup[product],
+                        round(avg_product_cost_lookup[product], 2),
                         campaign_format
                     )
 
@@ -896,7 +917,7 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                     deliv_ref = f"{xl_col_to_name(delivered_col)}{row+1}"
                     worksheet.write_formula(
                         row, total_prod_cost_col,
-                        f"=N({pc_input_ref})*N({deliv_ref})",
+                        f"=ROUND(N({pc_input_ref})*N({deliv_ref}),2)",
                         campaign_format
                     )
 
@@ -904,7 +925,7 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                 
                 # Shipping Cost Per Item (constant)
                 if shipping_per_item_col is not None:
-                    safe_write(worksheet, row, shipping_per_item_col, shipping_rate, campaign_format)
+                    safe_write(worksheet, row, shipping_per_item_col, round(shipping_rate, 2), campaign_format)
                 
                 # Total Shipping Cost = Shipping Cost Per Item × Purchases
                 if total_shipping_col is not None and shipping_per_item_col is not None and purchases_col is not None:
@@ -912,13 +933,13 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                     purchases_ref = f"{xl_col_to_name(purchases_col)}{row+1}"
                     worksheet.write_formula(
                         row, total_shipping_col,
-                        f"=N({shipping_per_ref})*N({purchases_ref})",
+                        f"=ROUND(N({shipping_per_ref})*N({purchases_ref}),2)",
                         campaign_format
                     )
                 
                 # Operational Cost Per Item (constant)
                 if operational_per_item_col is not None:
-                    safe_write(worksheet, row, operational_per_item_col, operational_rate, campaign_format)
+                    safe_write(worksheet, row, operational_per_item_col, round(operational_rate, 2), campaign_format)
                 
                 # Total Operational Cost = Operational Cost Per Item × Purchases
                 if total_operational_col is not None and operational_per_item_col is not None and purchases_col is not None:
@@ -926,11 +947,11 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                     purchases_ref = f"{xl_col_to_name(purchases_col)}{row+1}"
                     worksheet.write_formula(
                         row, total_operational_col,
-                        f"=N({operational_per_ref})*N({purchases_ref})",
+                        f"=ROUND(N({operational_per_ref})*N({purchases_ref}),2)",
                         campaign_format
                     )
 
-                # ==== NEW: Net Profit and Net Profit (%) calculations ====
+                # ==== Net Profit and Net Profit (%) calculations ====
                 
                 # Net Profit = Net Revenue - Ad Spent - Shipping Cost - Operation Cost - Total Product Cost
                 if net_profit_col is not None:
@@ -961,7 +982,7 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                     if total_prod_cost_col is not None:
                         formula_parts.append(f"-N({xl_col_to_name(total_prod_cost_col)}{row+1})")
                     
-                    net_profit_formula = "=" + "".join(formula_parts) if len(formula_parts) > 1 else "=0"
+                    net_profit_formula = "=ROUND(" + "".join(formula_parts) + ",2)" if len(formula_parts) > 1 else "=0"
                     worksheet.write_formula(row, net_profit_col, net_profit_formula, campaign_format)
                 
                 # Net Profit (%) = Net Profit / Net Revenue * 100
@@ -970,7 +991,7 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                     net_rev_ref = f"{xl_col_to_name(net_rev_col)}{row+1}"
                     worksheet.write_formula(
                         row, net_profit_pct_col,
-                        f"=IF(N({net_rev_ref})=0,0,N({net_profit_ref})/N({net_rev_ref})*100)",
+                        f"=IF(N({net_rev_ref})=0,0,ROUND(N({net_profit_ref})/N({net_rev_ref})*100,2))",
                         campaign_format
                     )
 
@@ -982,8 +1003,8 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                 worksheet.set_column(i, i, 35)
             elif col in ["Total Shipping Cost", "Total Operational Cost", "Shipping Cost Per Item", "Operational Cost Per Item"]:
                 worksheet.set_column(i, i, 18)
-            elif col in ["Net Profit", "Net Profit (%)", "Cost Per Item"]:
-                worksheet.set_column(i, i, 15)
+            elif col in ["Net Profit", "Net Profit (%)", "Cost Per Purchase (INR)", "Cost Per Purchase (USD)"]:
+                worksheet.set_column(i, i, 20)
             else:
                 worksheet.set_column(i, i, 15)
 
@@ -997,16 +1018,18 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
         })
         unmatched_data_format = workbook.add_format({
             "align": "left", "valign": "vcenter",
-            "fg_color": "#FFE6E6", "font_name": "Calibri", "font_size": 11
+            "fg_color": "#FFE6E6", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00"  # 2 decimal places
         })
         matched_summary_format = workbook.add_format({
             "align": "left", "valign": "vcenter",
-            "fg_color": "#E6FFE6", "font_name": "Calibri", "font_size": 11
+            "fg_color": "#E6FFE6", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00"  # 2 decimal places
         })
         
         # Headers for unmatched sheet
         unmatched_headers = ["Status", "Product", "Campaign Name", "Amount Spent (USD)", 
-                           "Amount Spent (INR)", "Purchases", "Cost Per Item", "Reason"]
+                           "Amount Spent (INR)", "Purchases", "Cost Per Purchase (INR)", "Cost Per Purchase (USD)", "Reason"]
         
         for col_num, header in enumerate(unmatched_headers):
             safe_write(unmatched_sheet, 0, col_num, header, unmatched_header_format)
@@ -1026,9 +1049,11 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
             current_row += 1
             
             for campaign in unmatched_campaigns:
-                cost_per_item = 0
+                cost_per_purchase_inr = 0
+                cost_per_purchase_usd = 0
                 if campaign['Purchases'] > 0:
-                    cost_per_item = campaign['Amount Spent (INR)'] / campaign['Purchases']
+                    cost_per_purchase_inr = round(campaign['Amount Spent (INR)'] / campaign['Purchases'], 2)
+                    cost_per_purchase_usd = round(campaign['Amount Spent (USD)'] / campaign['Purchases'], 2)
                 
                 safe_write(unmatched_sheet, current_row, 0, "UNMATCHED", unmatched_data_format)
                 safe_write(unmatched_sheet, current_row, 1, campaign['Product'], unmatched_data_format)
@@ -1036,8 +1061,9 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                 safe_write(unmatched_sheet, current_row, 3, campaign['Amount Spent (USD)'], unmatched_data_format)
                 safe_write(unmatched_sheet, current_row, 4, campaign['Amount Spent (INR)'], unmatched_data_format)
                 safe_write(unmatched_sheet, current_row, 5, campaign['Purchases'], unmatched_data_format)
-                safe_write(unmatched_sheet, current_row, 6, cost_per_item, unmatched_data_format)
-                safe_write(unmatched_sheet, current_row, 7, "No matching Shopify product found", unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 6, cost_per_purchase_inr, unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 7, cost_per_purchase_usd, unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 8, "No matching Shopify product found", unmatched_data_format)
                 current_row += 1
         
         # Write matched campaigns summary
@@ -1047,9 +1073,11 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
             current_row += 1
             
             for campaign in matched_campaigns[:10]:  # Show only first 10 to save space
-                cost_per_item = 0
+                cost_per_purchase_inr = 0
+                cost_per_purchase_usd = 0
                 if campaign['Purchases'] > 0:
-                    cost_per_item = campaign['Amount Spent (INR)'] / campaign['Purchases']
+                    cost_per_purchase_inr = round(campaign['Amount Spent (INR)'] / campaign['Purchases'], 2)
+                    cost_per_purchase_usd = round(campaign['Amount Spent (USD)'] / campaign['Purchases'], 2)
                 
                 safe_write(unmatched_sheet, current_row, 0, "MATCHED", matched_summary_format)
                 safe_write(unmatched_sheet, current_row, 1, campaign['Product'], matched_summary_format)
@@ -1057,8 +1085,9 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                 safe_write(unmatched_sheet, current_row, 3, campaign['Amount Spent (USD)'], matched_summary_format)
                 safe_write(unmatched_sheet, current_row, 4, campaign['Amount Spent (INR)'], matched_summary_format)
                 safe_write(unmatched_sheet, current_row, 5, campaign['Purchases'], matched_summary_format)
-                safe_write(unmatched_sheet, current_row, 6, cost_per_item, matched_summary_format)
-                safe_write(unmatched_sheet, current_row, 7, "Successfully matched with Shopify", matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 6, cost_per_purchase_inr, matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 7, cost_per_purchase_usd, matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 8, "Successfully matched with Shopify", matched_summary_format)
                 current_row += 1
             
             if len(matched_campaigns) > 10:
@@ -1066,6 +1095,7 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
         
         # Set column widths for unmatched sheet
         unmatched_sheet.set_column(0, 0, 12)  # Status
+       
         unmatched_sheet.set_column(1, 1, 25)  # Product
         unmatched_sheet.set_column(2, 2, 35)  # Campaign Name
         unmatched_sheet.set_column(3, 3, 18)  # Amount USD
@@ -1106,5 +1136,7 @@ if campaign_file:
             )
             
             
+
+
 
 
