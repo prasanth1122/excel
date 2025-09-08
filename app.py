@@ -627,6 +627,8 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         workbook = writer.book
+        
+        # ==== MAIN SHEET: Campaign Data ====
         worksheet = workbook.add_worksheet("Campaign Data")
         writer.sheets["Campaign Data"] = worksheet
 
@@ -642,14 +644,6 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
         campaign_format = workbook.add_format({
             "align": "left", "valign": "vcenter",
             "fg_color": "#D9E1F2", "font_name": "Calibri", "font_size": 11
-        })
-        missing_header_format = workbook.add_format({
-            "bold": True, "align": "center", "valign": "vcenter",
-            "fg_color": "#FF9999", "font_name": "Calibri", "font_size": 11
-        })
-        missing_campaign_format = workbook.add_format({
-            "align": "left", "valign": "vcenter",
-            "fg_color": "#FFE6E6", "font_name": "Calibri", "font_size": 11
         })
 
         # ==== Build Columns ====
@@ -707,9 +701,18 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                 cols_to_sum.append(columns.index(c))
 
         row = 1
+        
+        # Track campaigns that have Shopify data vs those that don't
+        matched_campaigns = []
+        unmatched_campaigns = []
 
         # ==== Group by product ====
         for product, product_df in df.groupby("Product"):
+            # Check if this product has Shopify data
+            has_shopify_data = (product in shopify_totals or 
+                              product in avg_price_lookup or 
+                              product in avg_product_cost_lookup)
+            
             # MODIFIED: Calculate Cost Per Item and sort by it instead of Amount Spent
             product_df = product_df.copy()  # Make a copy to avoid modifying original
             
@@ -730,6 +733,22 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                     product_df = product_df.sort_values("Amount Spent (USD)", ascending=True)
                 elif "Amount Spent (INR)" in product_df.columns:
                     product_df = product_df.sort_values("Amount Spent (INR)", ascending=True)
+            
+            # Categorize campaigns for the unmatched sheet
+            for _, campaign_row in product_df.iterrows():
+                campaign_info = {
+                    'Product': str(product) if pd.notna(product) else '',
+                    'Campaign Name': str(campaign_row.get('Campaign Name', '')) if pd.notna(campaign_row.get('Campaign Name', '')) else '',
+                    'Amount Spent (USD)': float(campaign_row.get('Amount Spent (USD)', 0)) if pd.notna(campaign_row.get('Amount Spent (USD)', 0)) else 0.0,
+                    'Amount Spent (INR)': float(campaign_row.get('Amount Spent (INR)', 0)) if pd.notna(campaign_row.get('Amount Spent (INR)', 0)) else 0.0,
+                    'Purchases': int(campaign_row.get('Purchases', 0)) if pd.notna(campaign_row.get('Purchases', 0)) else 0,
+                    'Has Shopify Data': has_shopify_data
+                }
+                
+                if has_shopify_data:
+                    matched_campaigns.append(campaign_info)
+                else:
+                    unmatched_campaigns.append(campaign_info)
             
             product_total_row_idx = row
 
@@ -957,60 +976,6 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
 
                 row += 1
 
-        # ==== NEW: Add Missing Campaigns Section ====
-        if original_campaign_df is not None:
-            # Find campaigns that are in original but not in processed final data
-            processed_campaigns = set()
-            if not df.empty:
-                processed_campaigns = set(df['Campaign Name'].tolist())
-            
-            missing_campaigns = []
-            for _, orig_campaign in original_campaign_df.iterrows():
-                campaign_name = orig_campaign.get('Campaign name', '')
-                if campaign_name not in processed_campaigns:
-                    missing_campaigns.append(orig_campaign)
-            
-            if missing_campaigns:
-                # Add some space before missing campaigns section
-                row += 2
-                
-                # Missing campaigns header
-                safe_write(worksheet, row, 0, "MISSING CAMPAIGNS", missing_header_format)
-                safe_write(worksheet, row, campaign_name_col if campaign_name_col else 1, "CAMPAIGNS NOT PROCESSED", missing_header_format)
-                row += 1
-                
-                # Add missing campaigns
-                for missing_campaign in missing_campaigns:
-                    safe_write(worksheet, row, 0, "UNPROCESSED", missing_campaign_format)
-                    
-                    if campaign_name_col is not None:
-                        safe_write(worksheet, row, campaign_name_col, missing_campaign.get("Campaign name", ""), missing_campaign_format)
-                    if amount_usd_col is not None:
-                        safe_write(worksheet, row, amount_usd_col, missing_campaign.get("Amount spent (USD)", 0), missing_campaign_format)
-                    if amount_inr_col is not None:
-                        usd_amount = missing_campaign.get("Amount spent (USD)", 0)
-                        safe_write(worksheet, row, amount_inr_col, usd_amount * 100, missing_campaign_format)
-                    if purchases_col is not None:
-                        safe_write(worksheet, row, purchases_col, missing_campaign.get("Purchases", 0), missing_campaign_format)
-                    
-                    # Add Cost Per Item calculation for missing campaigns
-                    if cost_per_item_col is not None and amount_inr_col is not None and purchases_col is not None:
-                        amount_inr_ref = f"{xl_col_to_name(amount_inr_col)}{row+1}"
-                        purchases_ref = f"{xl_col_to_name(purchases_col)}{row+1}"
-                        worksheet.write_formula(
-                            row, cost_per_item_col,
-                            f"=IF(N({purchases_ref})=0,0,N({amount_inr_ref})/N({purchases_ref}))",
-                            missing_campaign_format
-                        )
-                    
-                    # Leave other columns empty for missing campaigns
-                    for col_idx in range(len(columns)):
-                        if col_idx not in [0, campaign_name_col, amount_usd_col, amount_inr_col, purchases_col, cost_per_item_col]:
-                            if col_idx is not None:  # Only write if column exists
-                                safe_write(worksheet, row, col_idx, "", missing_campaign_format)
-                    
-                    row += 1
-
         worksheet.freeze_panes(1, 0)
         for i, col in enumerate(columns):
             if col == "Campaign Name":
@@ -1021,6 +986,93 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                 worksheet.set_column(i, i, 15)
             else:
                 worksheet.set_column(i, i, 15)
+
+        # ==== NEW SHEET: Unmatched Campaigns ====
+        unmatched_sheet = workbook.add_worksheet("Unmatched Campaigns")
+        
+        # Formats for unmatched sheet
+        unmatched_header_format = workbook.add_format({
+            "bold": True, "align": "center", "valign": "vcenter",
+            "fg_color": "#FF9999", "font_name": "Calibri", "font_size": 11
+        })
+        unmatched_data_format = workbook.add_format({
+            "align": "left", "valign": "vcenter",
+            "fg_color": "#FFE6E6", "font_name": "Calibri", "font_size": 11
+        })
+        matched_summary_format = workbook.add_format({
+            "align": "left", "valign": "vcenter",
+            "fg_color": "#E6FFE6", "font_name": "Calibri", "font_size": 11
+        })
+        
+        # Headers for unmatched sheet
+        unmatched_headers = ["Status", "Product", "Campaign Name", "Amount Spent (USD)", 
+                           "Amount Spent (INR)", "Purchases", "Cost Per Item", "Reason"]
+        
+        for col_num, header in enumerate(unmatched_headers):
+            safe_write(unmatched_sheet, 0, col_num, header, unmatched_header_format)
+        
+        # Write summary first
+        summary_row = 1
+        safe_write(unmatched_sheet, summary_row, 0, "SUMMARY", unmatched_header_format)
+        safe_write(unmatched_sheet, summary_row + 1, 0, f"Total Campaigns: {len(matched_campaigns) + len(unmatched_campaigns)}", matched_summary_format)
+        safe_write(unmatched_sheet, summary_row + 2, 0, f"Matched with Shopify: {len(matched_campaigns)}", matched_summary_format)
+        safe_write(unmatched_sheet, summary_row + 3, 0, f"Unmatched with Shopify: {len(unmatched_campaigns)}", unmatched_data_format)
+        
+        # Write unmatched campaigns
+        current_row = summary_row + 5
+        
+        if unmatched_campaigns:
+            safe_write(unmatched_sheet, current_row, 0, "CAMPAIGNS WITHOUT SHOPIFY DATA", unmatched_header_format)
+            current_row += 1
+            
+            for campaign in unmatched_campaigns:
+                cost_per_item = 0
+                if campaign['Purchases'] > 0:
+                    cost_per_item = campaign['Amount Spent (INR)'] / campaign['Purchases']
+                
+                safe_write(unmatched_sheet, current_row, 0, "UNMATCHED", unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 1, campaign['Product'], unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 2, campaign['Campaign Name'], unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 3, campaign['Amount Spent (USD)'], unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 4, campaign['Amount Spent (INR)'], unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 5, campaign['Purchases'], unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 6, cost_per_item, unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 7, "No matching Shopify product found", unmatched_data_format)
+                current_row += 1
+        
+        # Write matched campaigns summary
+        if matched_campaigns:
+            current_row += 2
+            safe_write(unmatched_sheet, current_row, 0, "CAMPAIGNS WITH SHOPIFY DATA (FOR REFERENCE)", unmatched_header_format)
+            current_row += 1
+            
+            for campaign in matched_campaigns[:10]:  # Show only first 10 to save space
+                cost_per_item = 0
+                if campaign['Purchases'] > 0:
+                    cost_per_item = campaign['Amount Spent (INR)'] / campaign['Purchases']
+                
+                safe_write(unmatched_sheet, current_row, 0, "MATCHED", matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 1, campaign['Product'], matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 2, campaign['Campaign Name'], matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 3, campaign['Amount Spent (USD)'], matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 4, campaign['Amount Spent (INR)'], matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 5, campaign['Purchases'], matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 6, cost_per_item, matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 7, "Successfully matched with Shopify", matched_summary_format)
+                current_row += 1
+            
+            if len(matched_campaigns) > 10:
+                safe_write(unmatched_sheet, current_row, 0, f"... and {len(matched_campaigns) - 10} more matched campaigns", matched_summary_format)
+        
+        # Set column widths for unmatched sheet
+        unmatched_sheet.set_column(0, 0, 12)  # Status
+        unmatched_sheet.set_column(1, 1, 25)  # Product
+        unmatched_sheet.set_column(2, 2, 35)  # Campaign Name
+        unmatched_sheet.set_column(3, 3, 18)  # Amount USD
+        unmatched_sheet.set_column(4, 4, 18)  # Amount INR
+        unmatched_sheet.set_column(5, 5, 12)  # Purchases
+        unmatched_sheet.set_column(6, 6, 15)  # Cost Per Item
+        unmatched_sheet.set_column(7, 7, 30)  # Reason
 
     return output.getvalue()
 
@@ -1054,3 +1106,5 @@ if campaign_file:
             )
             
             
+
+
