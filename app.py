@@ -602,16 +602,19 @@ def convert_shopify_to_excel(df):
     return output.getvalue()
 
     
-export_df = df_shopify.drop(columns=["Product Name", "Canonical Product"], errors="ignore")
+# ---- SHOPIFY DOWNLOAD ----
+if df_shopify is not None:
+    export_df = df_shopify.drop(columns=["Product Name", "Canonical Product"], errors="ignore")
 
-    # ---- DOWNLOAD BUTTONS ----
-shopify_excel = convert_shopify_to_excel(export_df)
-st.download_button(
+    shopify_excel = convert_shopify_to_excel(export_df)
+    st.download_button(
         label="📥 Download Processed Shopify File (Excel)",
         data=shopify_excel,
         file_name="processed_shopify.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+else:
+    st.warning("⚠️ Please upload a Shopify file to process.")
 def convert_final_campaign_to_excel(df, original_campaign_df=None):
     if df.empty:
         return None
@@ -1136,6 +1139,7 @@ if campaign_file:
             )
             
             
+
 
 
 
