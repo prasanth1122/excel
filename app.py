@@ -615,6 +615,7 @@ if df_shopify is not None:
     )
 else:
     st.warning("⚠️ Please upload a Shopify file to process.")
+
 def convert_final_campaign_to_excel(df, original_campaign_df=None):
     if df.empty:
         return None
@@ -798,11 +799,24 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
                     product_total_format
                 )
 
-            # ==== Shopify totals injection ====
-            if delivered_col is not None and product in shopify_totals:
-                safe_write(worksheet, product_total_row_idx, delivered_col, round(shopify_totals[product]["Delivered Orders"], 2), product_total_format)
+            # Delivery Rate (from Shopify lookup if available)
             if rate_col is not None and product in shopify_totals:
-                safe_write(worksheet, product_total_row_idx, rate_col, round(shopify_totals[product]["Delivery Rate"], 2), product_total_format)
+                safe_write(
+                   worksheet, product_total_row_idx, rate_col,
+                   round(shopify_totals[product]["Delivery Rate"], 4),  # keep 4 decimals for accuracy
+                   product_total_format
+                )
+
+# Delivered Orders (calculated as Delivery Rate × Purchases total)
+            if delivered_col is not None and purchases_col is not None and rate_col is not None:
+                purchases_ref = f"{xl_col_to_name(purchases_col)}{product_total_row_idx+1}"
+                rate_ref = f"{xl_col_to_name(rate_col)}{product_total_row_idx+1}"
+                worksheet.write_formula(
+                     product_total_row_idx, delivered_col,
+                    f"=ROUND(N({purchases_ref})*N({rate_ref}),2)",
+                     product_total_format
+                             )
+
 
             if avg_price_col is not None and product in avg_price_lookup:
                 safe_write(worksheet, product_total_row_idx, avg_price_col, round(avg_price_lookup[product], 2), product_total_format)
@@ -1098,7 +1112,7 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
         
         # Set column widths for unmatched sheet
         unmatched_sheet.set_column(0, 0, 12)  # Status
-       
+        
         unmatched_sheet.set_column(1, 1, 25)  # Product
         unmatched_sheet.set_column(2, 2, 35)  # Campaign Name
         unmatched_sheet.set_column(3, 3, 18)  # Amount USD
@@ -1139,6 +1153,7 @@ if campaign_file:
             )
             
             
+
 
 
 
