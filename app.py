@@ -989,7 +989,6 @@ def convert_shopify_to_excel(df):
 
 
 
-
 def convert_shopify_to_excel_with_date_columns_fixed(df):
     """Convert Shopify data to Excel with collapsible column groups every 12 columns after base columns"""
     if df is None or df.empty:
@@ -1001,30 +1000,63 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
         worksheet = workbook.add_worksheet("Shopify Data")
         writer.sheets["Shopify Data"] = worksheet
 
-        # Formats (same as your existing function)
+        # Formats with conditional formatting based on net items sold
         header_format = workbook.add_format({
             "bold": True, "align": "center", "valign": "vcenter",
-            "fg_color": "#DDD9C4", "font_name": "Calibri", "font_size": 11
+            "fg_color": "#DDD9C4", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00"
         })
         date_header_format = workbook.add_format({
             "bold": True, "align": "center", "valign": "vcenter",
-            "fg_color": "#B4C6E7", "font_name": "Calibri", "font_size": 11
+            "fg_color": "#B4C6E7", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00"
         })
         total_header_format = workbook.add_format({
             "bold": True, "align": "center", "valign": "vcenter",
-            "fg_color": "#FFD966", "font_name": "Calibri", "font_size": 11
+            "fg_color": "#FFD966", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00"
         })
         grand_total_format = workbook.add_format({
             "bold": True, "align": "left", "valign": "vcenter",
-            "fg_color": "#FFC000", "font_name": "Calibri", "font_size": 11
+            "fg_color": "#FFC000", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00"
         })
-        product_total_format = workbook.add_format({
+        
+        # Conditional formats for different net items sold ranges
+        # Format for products with < 15 net items sold (Red theme)
+        product_total_format_low = workbook.add_format({
             "bold": True, "align": "left", "valign": "vcenter",
-            "fg_color": "#FFD966", "font_name": "Calibri", "font_size": 11
+            "fg_color": "#FFB3B3", "font_name": "Calibri", "font_size": 11,  # Light red
+            "num_format": "#,##0.00"
         })
-        variant_format = workbook.add_format({
+        variant_format_low = workbook.add_format({
             "align": "left", "valign": "vcenter",
-            "fg_color": "#D9E1F2", "font_name": "Calibri", "font_size": 11
+            "fg_color": "#FFD6D6", "font_name": "Calibri", "font_size": 11,  # Very light red
+            "num_format": "#,##0.00"
+        })
+        
+        # Format for products with 15-50 net items sold (Yellow theme)
+        product_total_format_medium = workbook.add_format({
+            "bold": True, "align": "left", "valign": "vcenter",
+            "fg_color": "#FFEB9C", "font_name": "Calibri", "font_size": 11,  # Light yellow
+            "num_format": "#,##0.00"
+        })
+        variant_format_medium = workbook.add_format({
+            "align": "left", "valign": "vcenter",
+            "fg_color": "#FFF2CC", "font_name": "Calibri", "font_size": 11,  # Very light yellow
+            "num_format": "#,##0.00"
+        })
+        
+        # Format for products with > 50 net items sold (Default blue theme)
+        product_total_format_high = workbook.add_format({
+            "bold": True, "align": "left", "valign": "vcenter",
+            "fg_color": "#FFD966", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00"
+        })
+        variant_format_high = workbook.add_format({
+            "align": "left", "valign": "vcenter",
+            "fg_color": "#D9E1F2", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00"
         })
 
         # Check if we have dates
@@ -1036,8 +1068,8 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
         # Get unique dates and sort them
         unique_dates = sorted([str(d) for d in df['Date'].unique() if pd.notna(d) and str(d).strip() != ''])
         
-        # Define base columns (A, B, C, D - columns 0, 1, 2, 3)
-        base_columns = ["Product title", "Product variant title", "Delivery Rate", "Product Cost (Input)"]
+        # Define base columns (A, B, C, D, E - columns 0, 1, 2, 3, 4)
+        base_columns = ["Product title", "Product variant title", "Delivery Rate", "Product Cost (Input)", "Net items sold"]
         
         # Define metrics that will be repeated for each date (12 metrics = 12 columns per date)
         date_metrics = ["Net items sold", "Avg Price", "Delivery Rate", "Product Cost (Input)", 
@@ -1075,14 +1107,14 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                 safe_write(worksheet, 0, col_num, col_name, header_format)
 
         # SET UP COLUMN GROUPING - ACCOUNT FOR SEPARATOR COLUMNS
-        # Base columns are 0, 1, 2, 3 (A, B, C, D) - NO GROUPING
-        # Separator column after base is column 4 - NO GROUPING
+        # Base columns are 0, 1, 2, 3, 4 (A, B, C, D, E) - NO GROUPING
+        # Separator column after base is column 5 - NO GROUPING
         
-        # Start grouping from column 5 (column F) onwards - after base + separator
-        start_col = 5  # Column F (after base columns A, B, C, D + separator E)
+        # Start grouping from column 6 (column G) onwards - after base + separator
+        start_col = 6  # Column G (after base columns A, B, C, D, E + separator F)
         total_columns = len(all_columns)
         
-        # Group every 12 columns + 1 separator = 13 positions starting from column 5
+        # Group every 12 columns + 1 separator = 13 positions starting from column 6
         group_level = 1
         while start_col < total_columns:
             # Skip if this is a separator column
@@ -1114,8 +1146,8 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
         
         # Set base column widths (always visible, NO GROUPING)
         worksheet.set_column(0, 1, 25)  # Product title and variant title
-        worksheet.set_column(2, 3, 15)  # Base delivery rate, product cost
-        worksheet.set_column(4, 4, 3)   # Separator column after base - narrow width
+        worksheet.set_column(2, 4, 15)  # Base delivery rate, product cost, net items sold
+        worksheet.set_column(5, 5, 3)   # Separator column after base - narrow width
 
         # Configure outline settings for better user experience
         worksheet.outline_settings(
@@ -1124,8 +1156,6 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
             auto_style=False       # Don't use automatic styling
         )
 
-        # YOUR EXISTING DATA PROCESSING LOGIC (unchanged)
-        
         # Grand total row
         grand_total_row_idx = 1
         safe_write(worksheet, grand_total_row_idx, 0, "GRAND TOTAL", grand_total_format)
@@ -1138,6 +1168,24 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
         for product, product_df in df.groupby("Product title"):
             product_total_row_idx = row
             product_total_rows.append(product_total_row_idx)
+
+            # Calculate total net items sold for this product to determine formatting
+            total_net_items_for_product = 0
+            for _, variant_group in product_df.groupby("Product variant title"):
+                for _, row_data in variant_group.iterrows():
+                    net_items = row_data.get("Net items sold", 0) or 0
+                    total_net_items_for_product += net_items
+            
+            # Choose formatting based on total net items sold
+            if total_net_items_for_product < 15:
+                product_total_format = product_total_format_low
+                variant_format = variant_format_low
+            elif 15 <= total_net_items_for_product <= 50:
+                product_total_format = product_total_format_medium
+                variant_format = variant_format_medium
+            else:
+                product_total_format = product_total_format_high
+                variant_format = variant_format_high
 
             # Product total row
             safe_write(worksheet, product_total_row_idx, 0, product, product_total_format)
@@ -1172,8 +1220,11 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                 avg_delivery_rate = sum(delivery_rates) / len(delivery_rates) if delivery_rates else 0
                 avg_product_cost = sum(product_costs) / len(product_costs) if product_costs else 0
                 
-                safe_write(worksheet, variant_row_idx, 2, avg_delivery_rate, variant_format)
-                safe_write(worksheet, variant_row_idx, 3, avg_product_cost, variant_format)
+                safe_write(worksheet, variant_row_idx, 2, round(avg_delivery_rate, 2), variant_format)
+                safe_write(worksheet, variant_row_idx, 3, round(avg_product_cost, 2), variant_format)
+                
+                # Leave Net items sold column empty for variants (column 4)
+                safe_write(worksheet, variant_row_idx, 4, "", variant_format)
                 
                 # Cell references for base columns
                 excel_row = variant_row_idx + 1
@@ -1221,74 +1272,74 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                         product_cost_input = row_data.get("Product Cost (Input)", 0) or 0
                         ad_spend_usd = row_data.get("Ad Spend (USD)", 0) or 0
                         
-                        safe_write(worksheet, variant_row_idx, net_items_col_idx, net_items, variant_format)
-                        safe_write(worksheet, variant_row_idx, avg_price_col_idx, avg_price, variant_format)
-                        safe_write(worksheet, variant_row_idx, ad_spend_col_idx, ad_spend_usd, variant_format)
+                        safe_write(worksheet, variant_row_idx, net_items_col_idx, int(net_items), variant_format)
+                        safe_write(worksheet, variant_row_idx, avg_price_col_idx, round(avg_price, 2), variant_format)
+                        safe_write(worksheet, variant_row_idx, ad_spend_col_idx, round(ad_spend_usd, 2), variant_format)
                         
                         # Date-specific Delivery Rate and Product Cost link to base columns
                         if delivery_rate > 0:
-                            safe_write(worksheet, variant_row_idx, delivery_rate_col_idx, delivery_rate, variant_format)
+                            safe_write(worksheet, variant_row_idx, delivery_rate_col_idx, round(delivery_rate, 2), variant_format)
                         else:
                             worksheet.write_formula(
                                 variant_row_idx, delivery_rate_col_idx,
-                                f"={base_delivery_rate_ref}",
+                                f"=ROUND({base_delivery_rate_ref},2)",
                                 variant_format
                             )
                         
                         if product_cost_input > 0:
-                            safe_write(worksheet, variant_row_idx, product_cost_input_col_idx, product_cost_input, variant_format)
+                            safe_write(worksheet, variant_row_idx, product_cost_input_col_idx, round(product_cost_input, 2), variant_format)
                         else:
                             worksheet.write_formula(
                                 variant_row_idx, product_cost_input_col_idx,
-                                f"={base_product_cost_ref}",
+                                f"=ROUND({base_product_cost_ref},2)",
                                 variant_format
                             )
                         
                     else:
                         # No data for this date - link to base columns and fill other fields with zeros
                         safe_write(worksheet, variant_row_idx, net_items_col_idx, 0, variant_format)
-                        safe_write(worksheet, variant_row_idx, avg_price_col_idx, 0, variant_format)
-                        safe_write(worksheet, variant_row_idx, ad_spend_col_idx, 0, variant_format)
+                        safe_write(worksheet, variant_row_idx, avg_price_col_idx, 0.00, variant_format)
+                        safe_write(worksheet, variant_row_idx, ad_spend_col_idx, 0.00, variant_format)
                         
                         worksheet.write_formula(
                             variant_row_idx, delivery_rate_col_idx,
-                            f"={base_delivery_rate_ref}",
+                            f"=ROUND({base_delivery_rate_ref},2)",
                             variant_format
                         )
                         worksheet.write_formula(
                             variant_row_idx, product_cost_input_col_idx,
-                            f"={base_product_cost_ref}",
+                            f"=ROUND({base_product_cost_ref},2)",
                             variant_format
                         )
                     
-                    # FORMULAS for calculated fields
+                    # FORMULAS for calculated fields (with ROUND for 2 decimal places)
                     
                     # Delivered Orders = Net items sold * Delivery Rate
                     rate_term = f"IF(ISNUMBER({delivery_rate_ref}),IF({delivery_rate_ref}>1,{delivery_rate_ref}/100,{delivery_rate_ref}),0)"
                     worksheet.write_formula(
                         variant_row_idx, delivered_orders_col_idx,
-                        f"=ROUND({net_items_ref}*{rate_term},1)",
+                        f"=ROUND({net_items_ref}*{rate_term},2)",
                         variant_format
                     )
                     
                     # Net Revenue = Delivered Orders * Average Price
                     worksheet.write_formula(
                         variant_row_idx, net_revenue_col_idx,
-                        f"={delivered_orders_ref}*{avg_price_ref}",
+                        f"=ROUND({delivered_orders_ref}*{avg_price_ref},2)",
                         variant_format
                     )
                     
                     # Shipping Cost = Net items sold * shipping_rate
                     worksheet.write_formula(
                         variant_row_idx, shipping_cost_col_idx,
-                        f"={shipping_rate}*{net_items_ref}",
+                        f"=ROUND({shipping_rate}*{net_items_ref},2)",
                         variant_format
                     )
                     
                     # Operational Cost = Net items sold * operational_rate
                     worksheet.write_formula(
                         variant_row_idx, operational_cost_col_idx,
-                        f"={operational_rate}*{net_items_ref}",
+                        f"=ROUND({operational_rate}*{net_items_ref},2)",
                         variant_format
                     )
                     
@@ -1296,25 +1347,25 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                     pc_term = f"IF(ISNUMBER({product_cost_input_ref}),{product_cost_input_ref},0)"
                     worksheet.write_formula(
                         variant_row_idx, product_cost_output_col_idx,
-                        f"={pc_term}*{delivered_orders_ref}",
+                        f"=ROUND({pc_term}*{delivered_orders_ref},2)",
                         variant_format
                     )
                     
                     # Net Profit = Net Revenue - Ad Spend (USD)*100 - Shipping Cost - Operational Cost - Product Cost (Output)
                     worksheet.write_formula(
                         variant_row_idx, net_profit_col_idx,
-                        f"={net_revenue_ref}-{ad_spend_ref}*100-{shipping_cost_ref}-{operational_cost_ref}-{product_cost_output_ref}",
+                        f"=ROUND({net_revenue_ref}-{ad_spend_ref}*100-{shipping_cost_ref}-{operational_cost_ref}-{product_cost_output_ref},2)",
                         variant_format
                     )
                     
                     # Net Profit (%) = Net Profit / Net Revenue * 100
                     worksheet.write_formula(
                         variant_row_idx, net_profit_percent_col_idx,
-                        f"=IF({net_revenue_ref}=0,0,{net_profit_ref}/{net_revenue_ref}*100)",
+                        f"=ROUND(IF({net_revenue_ref}=0,0,{net_profit_ref}/{net_revenue_ref}*100),2)",
                         variant_format
                     )
                 
-                # FIXED TOTAL COLUMNS CALCULATIONS FOR VARIANT
+                # TOTAL COLUMNS CALCULATIONS FOR VARIANT (with ROUND for 2 decimal places)
                 for metric in date_metrics:
                     total_col_idx = all_columns.index(f"Total_{metric}")
                     
@@ -1357,14 +1408,14 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                             sumproduct_formula = "+".join(price_terms)
                             worksheet.write_formula(
                                 variant_row_idx, total_col_idx,
-                                f"=IF({total_net_items_ref}=0,0,({sumproduct_formula})/{total_net_items_ref})",
+                                f"=ROUND(IF({total_net_items_ref}=0,0,({sumproduct_formula})/{total_net_items_ref}),2)",
                                 variant_format
                             )
                         else:
                             single_date_col = all_columns.index(f"{unique_dates[0]}_{metric}")
                             worksheet.write_formula(
                                 variant_row_idx, total_col_idx,
-                                f"={xl_col_to_name(single_date_col)}{excel_row}",
+                                f"=ROUND({xl_col_to_name(single_date_col)}{excel_row},2)",
                                 variant_format
                             )
                     
@@ -1383,14 +1434,14 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                             sumproduct_formula = "+".join(rate_terms)
                             worksheet.write_formula(
                                 variant_row_idx, total_col_idx,
-                                f"=IF({total_net_items_ref}=0,0,({sumproduct_formula})/{total_net_items_ref})",
+                                f"=ROUND(IF({total_net_items_ref}=0,0,({sumproduct_formula})/{total_net_items_ref}),2)",
                                 variant_format
                             )
                         else:
                             single_date_col = all_columns.index(f"{unique_dates[0]}_{metric}")
                             worksheet.write_formula(
                                 variant_row_idx, total_col_idx,
-                                f"={xl_col_to_name(single_date_col)}{excel_row}",
+                                f"=ROUND({xl_col_to_name(single_date_col)}{excel_row},2)",
                                 variant_format
                             )
                     
@@ -1409,14 +1460,14 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                             sumproduct_formula = "+".join(cost_terms)
                             worksheet.write_formula(
                                 variant_row_idx, total_col_idx,
-                                f"=IF({total_net_items_ref}=0,0,({sumproduct_formula})/{total_net_items_ref})",
+                                f"=ROUND(IF({total_net_items_ref}=0,0,({sumproduct_formula})/{total_net_items_ref}),2)",
                                 variant_format
                             )
                         else:
                             single_date_col = all_columns.index(f"{unique_dates[0]}_{metric}")
                             worksheet.write_formula(
                                 variant_row_idx, total_col_idx,
-                                f"={xl_col_to_name(single_date_col)}{excel_row}",
+                                f"=ROUND({xl_col_to_name(single_date_col)}{excel_row},2)",
                                 variant_format
                             )
                     
@@ -1429,7 +1480,7 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                         
                         worksheet.write_formula(
                             variant_row_idx, total_col_idx,
-                            f"=IF({total_net_revenue_ref}=0,0,{total_net_profit_ref}/{total_net_revenue_ref}*100)",
+                            f"=ROUND(IF({total_net_revenue_ref}=0,0,{total_net_profit_ref}/{total_net_revenue_ref}*100),2)",
                             variant_format
                         )
                     
@@ -1443,28 +1494,50 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                                 date_refs.append(f"{xl_col_to_name(date_col_idx)}{excel_row}")
                             
                             sum_formula = "+".join(date_refs)
-                            worksheet.write_formula(
-                                variant_row_idx, total_col_idx,
-                                f"={sum_formula}",
-                                variant_format
-                            )
+                            if metric == "Net items sold":  # Don't round net items sold
+                                worksheet.write_formula(
+                                    variant_row_idx, total_col_idx,
+                                    f"={sum_formula}",
+                                    variant_format
+                                )
+                            else:
+                                worksheet.write_formula(
+                                    variant_row_idx, total_col_idx,
+                                    f"=ROUND({sum_formula},2)",
+                                    variant_format
+                                )
                         else:
                             single_date_col = all_columns.index(f"{unique_dates[0]}_{metric}")
-                            worksheet.write_formula(
-                                variant_row_idx, total_col_idx,
-                                f"={xl_col_to_name(single_date_col)}{excel_row}",
-                                variant_format
-                            )
+                            if metric == "Net items sold":  # Don't round net items sold
+                                worksheet.write_formula(
+                                    variant_row_idx, total_col_idx,
+                                    f"={xl_col_to_name(single_date_col)}{excel_row}",
+                                    variant_format
+                                )
+                            else:
+                                worksheet.write_formula(
+                                    variant_row_idx, total_col_idx,
+                                    f"=ROUND({xl_col_to_name(single_date_col)}{excel_row},2)",
+                                    variant_format
+                                )
                 
                 row += 1
             
-            # Calculate product totals by aggregating variant rows using RANGES
+            # Calculate product totals by aggregating variant rows using RANGES (with ROUND for 2 decimal places)
             if variant_rows:
                 # Build ranges for product totals
                 first_variant_row = min(variant_rows) + 1  # Excel row numbering
                 last_variant_row = max(variant_rows) + 1
                 
-                # FIXED PRODUCT TOTAL CALCULATIONS
+                # Fill Net items sold in base column (column 4) for product total
+                total_net_items_col_idx = all_columns.index("Total_Net items sold")
+                worksheet.write_formula(
+                    product_total_row_idx, 4,
+                    f"={xl_col_to_name(total_net_items_col_idx)}{product_total_row_idx+1}",
+                    product_total_format
+                )
+                
+                # PRODUCT TOTAL CALCULATIONS (with ROUND for 2 decimal places)
                 for date in unique_dates:
                     for metric in date_metrics:
                         col_idx = all_columns.index(f"{date}_{metric}")
@@ -1478,7 +1551,7 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                             
                             worksheet.write_formula(
                                 product_total_row_idx, col_idx,
-                                f"=IF(SUM({net_items_range})=0,0,SUMPRODUCT({metric_range},{net_items_range})/SUM({net_items_range}))",
+                                f"=ROUND(IF(SUM({net_items_range})=0,0,SUMPRODUCT({metric_range},{net_items_range})/SUM({net_items_range})),2)",
                                 product_total_format
                             )
                         elif metric == "Net Profit (%)":
@@ -1488,19 +1561,26 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                             
                             worksheet.write_formula(
                                 product_total_row_idx, col_idx,
-                                f"=IF({xl_col_to_name(net_revenue_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(net_profit_idx)}{product_total_row_idx+1}/{xl_col_to_name(net_revenue_idx)}{product_total_row_idx+1}*100)",
+                                f"=ROUND(IF({xl_col_to_name(net_revenue_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(net_profit_idx)}{product_total_row_idx+1}/{xl_col_to_name(net_revenue_idx)}{product_total_row_idx+1}*100),2)",
                                 product_total_format
                             )
                         else:
                             # Sum for other metrics using ranges
                             col_range = f"{xl_col_to_name(col_idx)}{first_variant_row}:{xl_col_to_name(col_idx)}{last_variant_row}"
-                            worksheet.write_formula(
-                                product_total_row_idx, col_idx,
-                                f"=SUM({col_range})",
-                                product_total_format
-                            )
+                            if metric == "Net items sold":  # Don't round net items sold
+                                worksheet.write_formula(
+                                    product_total_row_idx, col_idx,
+                                    f"=SUM({col_range})",
+                                    product_total_format
+                                )
+                            else:
+                                worksheet.write_formula(
+                                    product_total_row_idx, col_idx,
+                                    f"=ROUND(SUM({col_range}),2)",
+                                    product_total_format
+                                )
                 
-                # Calculate product totals for Total columns using RANGES
+                # Calculate product totals for Total columns using RANGES (with ROUND for 2 decimal places)
                 for metric in date_metrics:
                     col_idx = all_columns.index(f"Total_{metric}")
                     
@@ -1513,7 +1593,7 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                         
                         worksheet.write_formula(
                             product_total_row_idx, col_idx,
-                            f"=IF(SUM({net_items_range})=0,0,SUMPRODUCT({metric_range},{net_items_range})/SUM({net_items_range}))",
+                            f"=ROUND(IF(SUM({net_items_range})=0,0,SUMPRODUCT({metric_range},{net_items_range})/SUM({net_items_range})),2)",
                             product_total_format
                         )
                     elif metric == "Net Profit (%)":
@@ -1523,17 +1603,24 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                         
                         worksheet.write_formula(
                             product_total_row_idx, col_idx,
-                            f"=IF({xl_col_to_name(total_net_revenue_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(total_net_profit_idx)}{product_total_row_idx+1}/{xl_col_to_name(total_net_revenue_idx)}{product_total_row_idx+1}*100)",
+                            f"=ROUND(IF({xl_col_to_name(total_net_revenue_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(total_net_profit_idx)}{product_total_row_idx+1}/{xl_col_to_name(total_net_revenue_idx)}{product_total_row_idx+1}*100),2)",
                             product_total_format
                         )
                     else:
                         # Sum for other metrics using ranges
                         col_range = f"{xl_col_to_name(col_idx)}{first_variant_row}:{xl_col_to_name(col_idx)}{last_variant_row}"
-                        worksheet.write_formula(
-                            product_total_row_idx, col_idx,
-                            f"=SUM({col_range})",
-                            product_total_format
-                        )
+                        if metric == "Net items sold":  # Don't round net items sold
+                            worksheet.write_formula(
+                                product_total_row_idx, col_idx,
+                                f"=SUM({col_range})",
+                                product_total_format
+                            )
+                        else:
+                            worksheet.write_formula(
+                                product_total_row_idx, col_idx,
+                                f"=ROUND(SUM({col_range}),2)",
+                                product_total_format
+                            )
                 
                 # Base columns for product totals - reference the Total weighted averages
                 base_delivery_rate_col = 2
@@ -1543,33 +1630,41 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                 
                 worksheet.write_formula(
                     product_total_row_idx, base_delivery_rate_col,
-                    f"={xl_col_to_name(total_delivery_rate_col_idx)}{product_total_row_idx+1}",
+                    f"=ROUND({xl_col_to_name(total_delivery_rate_col_idx)}{product_total_row_idx+1},2)",
                     product_total_format
                 )
                 
                 worksheet.write_formula(
                     product_total_row_idx, base_product_cost_col,
-                    f"={xl_col_to_name(total_product_cost_col_idx)}{product_total_row_idx+1}",
+                    f"=ROUND({xl_col_to_name(total_product_cost_col_idx)}{product_total_row_idx+1},2)",
                     product_total_format
                 )
 
-        # Calculate grand totals using INDIVIDUAL PRODUCT TOTAL ROWS ONLY
+        # Calculate grand totals using INDIVIDUAL PRODUCT TOTAL ROWS ONLY (with ROUND for 2 decimal places)
         if product_total_rows:
             # Base columns for grand total
             base_delivery_rate_col = 2
             base_product_cost_col = 3
+            base_net_items_col = 4
             total_delivery_rate_col_idx = all_columns.index("Total_Delivery Rate")
             total_product_cost_col_idx = all_columns.index("Total_Product Cost (Input)")
+            total_net_items_col_idx = all_columns.index("Total_Net items sold")
             
             worksheet.write_formula(
                 grand_total_row_idx, base_delivery_rate_col,
-                f"={xl_col_to_name(total_delivery_rate_col_idx)}{grand_total_row_idx+1}",
+                f"=ROUND({xl_col_to_name(total_delivery_rate_col_idx)}{grand_total_row_idx+1},2)",
                 grand_total_format
             )
             
             worksheet.write_formula(
                 grand_total_row_idx, base_product_cost_col,
-                f"={xl_col_to_name(total_product_cost_col_idx)}{grand_total_row_idx+1}",
+                f"=ROUND({xl_col_to_name(total_product_cost_col_idx)}{grand_total_row_idx+1},2)",
+                grand_total_format
+            )
+            
+            worksheet.write_formula(
+                grand_total_row_idx, base_net_items_col,
+                f"={xl_col_to_name(total_net_items_col_idx)}{grand_total_row_idx+1}",
                 grand_total_format
             )
             
@@ -1600,7 +1695,7 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                         
                         worksheet.write_formula(
                             grand_total_row_idx, col_idx,
-                            f"=IF(({sum_net_items_formula})=0,0,({sumproduct_formula})/({sum_net_items_formula}))",
+                            f"=ROUND(IF(({sum_net_items_formula})=0,0,({sumproduct_formula})/({sum_net_items_formula})),2)",
                             grand_total_format
                         )
                     elif metric == "Net Profit (%)":
@@ -1610,7 +1705,7 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                         
                         worksheet.write_formula(
                             grand_total_row_idx, col_idx,
-                            f"=IF({xl_col_to_name(net_revenue_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(net_profit_idx)}{grand_total_row_idx+1}/{xl_col_to_name(net_revenue_idx)}{grand_total_row_idx+1}*100)",
+                            f"=ROUND(IF({xl_col_to_name(net_revenue_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(net_profit_idx)}{grand_total_row_idx+1}/{xl_col_to_name(net_revenue_idx)}{grand_total_row_idx+1}*100),2)",
                             grand_total_format
                         )
                     else:
@@ -1621,13 +1716,20 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                             sum_refs.append(f"{xl_col_to_name(col_idx)}{product_excel_row}")
                         
                         sum_formula = "+".join(sum_refs)
-                        worksheet.write_formula(
-                            grand_total_row_idx, col_idx,
-                            f"={sum_formula}",
-                            grand_total_format
-                        )
+                        if metric == "Net items sold":  # Don't round net items sold
+                            worksheet.write_formula(
+                                grand_total_row_idx, col_idx,
+                                f"={sum_formula}",
+                                grand_total_format
+                            )
+                        else:
+                            worksheet.write_formula(
+                                grand_total_row_idx, col_idx,
+                                f"=ROUND({sum_formula},2)",
+                                grand_total_format
+                            )
             
-            # Total columns for grand total using INDIVIDUAL PRODUCT TOTAL ROWS
+            # Total columns for grand total using INDIVIDUAL PRODUCT TOTAL ROWS (with ROUND for 2 decimal places)
             total_net_items_col_idx = all_columns.index("Total_Net items sold")
             
             for metric in date_metrics:
@@ -1654,7 +1756,7 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                     
                     worksheet.write_formula(
                         grand_total_row_idx, col_idx,
-                        f"=IF(({sum_net_items_formula})=0,0,({sumproduct_formula})/({sum_net_items_formula}))",
+                        f"=ROUND(IF(({sum_net_items_formula})=0,0,({sumproduct_formula})/({sum_net_items_formula})),2)",
                         grand_total_format
                     )
                 elif metric == "Net Profit (%)":
@@ -1664,7 +1766,7 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                     
                     worksheet.write_formula(
                         grand_total_row_idx, col_idx,
-                        f"=IF({xl_col_to_name(total_net_revenue_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(total_net_profit_idx)}{grand_total_row_idx+1}/{xl_col_to_name(total_net_revenue_idx)}{grand_total_row_idx+1}*100)",
+                        f"=ROUND(IF({xl_col_to_name(total_net_revenue_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(total_net_profit_idx)}{grand_total_row_idx+1}/{xl_col_to_name(total_net_revenue_idx)}{grand_total_row_idx+1}*100),2)",
                         grand_total_format
                     )
                 else:
@@ -1675,11 +1777,18 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                         sum_refs.append(f"{xl_col_to_name(col_idx)}{product_excel_row}")
                     
                     sum_formula = "+".join(sum_refs)
-                    worksheet.write_formula(
-                        grand_total_row_idx, col_idx,
-                        f"={sum_formula}",
-                        grand_total_format
-                    )
+                    if metric == "Net items sold":  # Don't round net items sold
+                        worksheet.write_formula(
+                            grand_total_row_idx, col_idx,
+                            f"={sum_formula}",
+                            grand_total_format
+                        )
+                    else:
+                        worksheet.write_formula(
+                            grand_total_row_idx, col_idx,
+                            f"=ROUND({sum_formula},2)",
+                            grand_total_format
+                        )
 
         # Freeze panes to keep base columns visible when scrolling
         worksheet.freeze_panes(2, len(base_columns))  # Freeze header and base columns
@@ -1930,13 +2039,15 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
 
 
 def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None):
-    """Convert Campaign data to Excel with day-wise lookups integrated"""
+    """Convert Campaign data to Excel with day-wise lookups integrated and unmatched campaigns sheet"""
     if df.empty:
         return None
     
     output = BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         workbook = writer.book
+        
+        # ==== MAIN SHEET: Campaign Data ====
         worksheet = workbook.add_worksheet("Campaign Data")
         writer.sheets["Campaign Data"] = worksheet
 
@@ -1970,7 +2081,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
         has_dates = 'Date' in df.columns
         if not has_dates:
             # Fall back to original structure if no dates
-            return convert_final_campaign_to_excel_original(df, shopify_df)
+            return convert_final_campaign_to_excel(df, shopify_df)
         
         # Get unique dates and sort them
         unique_dates = sorted([str(d) for d in df['Date'].unique() if pd.notna(d) and str(d).strip() != ''])
@@ -1996,6 +2107,10 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
         # Add total columns
         for metric in date_metrics:
             all_columns.append(f"Total_{metric}")
+
+        # Track campaigns for unmatched sheet analysis
+        matched_campaigns = []
+        unmatched_campaigns = []
 
         # Write headers (skip separator columns)
         for col_num, col_name in enumerate(all_columns):
@@ -2059,6 +2174,14 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
 
         # Group by product and restructure data
         for product, product_df in df.groupby("Product"):
+            # Check if this product has Shopify data (day-wise lookups)
+            has_shopify_data = (product in product_date_avg_prices and 
+                              any(date in product_date_avg_prices[product] for date in unique_dates) or
+                              product in product_date_delivery_rates and 
+                              any(date in product_date_delivery_rates[product] for date in unique_dates) or
+                              product in product_date_cost_inputs and 
+                              any(date in product_date_cost_inputs[product] for date in unique_dates))
+            
             product_total_row_idx = row
             product_total_rows.append(product_total_row_idx)
 
@@ -2071,6 +2194,26 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
             row += 1
             
             for campaign_name, campaign_group in product_df.groupby("Campaign Name"):
+                # Track this campaign for unmatched analysis
+                total_amount_spent_usd = campaign_group.get("Amount Spent (USD)", 0).sum() if "Amount Spent (USD)" in campaign_group.columns else 0
+                total_amount_spent_inr = campaign_group.get("Amount Spent (INR)", 0).sum() if "Amount Spent (INR)" in campaign_group.columns else 0
+                total_purchases = campaign_group.get("Purchases", 0).sum() if "Purchases" in campaign_group.columns else 0
+                
+                campaign_info = {
+                    'Product': str(product) if pd.notna(product) else '',
+                    'Campaign Name': str(campaign_name) if pd.notna(campaign_name) else '',
+                    'Amount Spent (USD)': round(float(total_amount_spent_usd), 2) if pd.notna(total_amount_spent_usd) else 0.0,
+                    'Amount Spent (INR)': round(float(total_amount_spent_inr), 2) if pd.notna(total_amount_spent_inr) else 0.0,
+                    'Purchases': int(total_purchases) if pd.notna(total_purchases) else 0,
+                    'Has Shopify Data': has_shopify_data,
+                    'Dates': sorted([str(d) for d in campaign_group['Date'].unique() if pd.notna(d)])
+                }
+                
+                if has_shopify_data:
+                    matched_campaigns.append(campaign_info)
+                else:
+                    unmatched_campaigns.append(campaign_info)
+                
                 campaign_row_idx = row
                 campaign_rows.append(campaign_row_idx)
                 
@@ -2117,22 +2260,22 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                     
                     # Average Price - from day-wise lookup for this product and date
                     date_avg_price = product_date_avg_prices.get(product, {}).get(date, 0)
-                    safe_write(worksheet, campaign_row_idx, avg_price_col_idx, date_avg_price, campaign_format)
+                    safe_write(worksheet, campaign_row_idx, avg_price_col_idx, round(float(date_avg_price), 2), campaign_format)
                     
                     # Delivery Rate - from day-wise lookup for this product and date
                     date_delivery_rate = product_date_delivery_rates.get(product, {}).get(date, 0)
-                    safe_write(worksheet, campaign_row_idx, delivery_rate_col_idx, date_delivery_rate, campaign_format)
+                    safe_write(worksheet, campaign_row_idx, delivery_rate_col_idx, round(float(date_delivery_rate), 2), campaign_format)
                     
                     # Product Cost Input - from day-wise lookup for this product and date
                     date_cost_input = product_date_cost_inputs.get(product, {}).get(date, 0)
-                    safe_write(worksheet, campaign_row_idx, product_cost_input_col_idx, date_cost_input, campaign_format)
+                    safe_write(worksheet, campaign_row_idx, product_cost_input_col_idx, round(float(date_cost_input), 2), campaign_format)
                     
                     if not date_data.empty:
                         row_data = date_data.iloc[0]
                         
                         # Amount Spent (USD) - from campaign data
                         amount_spent = row_data.get("Amount Spent (USD)", 0) or 0
-                        safe_write(worksheet, campaign_row_idx, amount_spent_col_idx, amount_spent, campaign_format)
+                        safe_write(worksheet, campaign_row_idx, amount_spent_col_idx, round(float(amount_spent), 2), campaign_format)
                         
                         # Purchases - from campaign data  
                         purchases = row_data.get("Purchases", 0) or 0
@@ -2148,7 +2291,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                     # Cost Per Purchase (USD) = Amount Spent (USD) / Purchases
                     worksheet.write_formula(
                         campaign_row_idx, cost_per_purchase_col_idx,
-                        f"=IF({purchases_ref}=0,0,{amount_spent_ref}/{purchases_ref})",
+                         f"=ROUND(IF({purchases_ref}=0,0,{amount_spent_ref}/{purchases_ref}),2)",
                         campaign_format
                     )
                     
@@ -2156,49 +2299,49 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                     rate_term = f"IF(ISNUMBER({delivery_rate_ref}),IF({delivery_rate_ref}>1,{delivery_rate_ref}/100,{delivery_rate_ref}),0)"
                     worksheet.write_formula(
                         campaign_row_idx, delivered_orders_col_idx,
-                        f"={purchases_ref}*{rate_term}",
+                        f"=ROUND({purchases_ref}*{rate_term},2)",
                         campaign_format
                     )
                     
                     # Net Revenue = Delivered Orders * Average Price
                     worksheet.write_formula(
                         campaign_row_idx, net_revenue_col_idx,
-                        f"={delivered_orders_ref}*{avg_price_ref}",
+                        f"=ROUND({delivered_orders_ref}*{avg_price_ref},2)",
                         campaign_format
                     )
                     
                     # Total Product Cost = Delivered Orders * Product Cost Input
                     worksheet.write_formula(
                         campaign_row_idx, total_product_cost_col_idx,
-                        f"={delivered_orders_ref}*{product_cost_input_ref}",
+                        f"=ROUND({delivered_orders_ref}*{product_cost_input_ref},2)",
                         campaign_format
                     )
                     
                     # Total Shipping Cost = Purchases * shipping_rate
                     worksheet.write_formula(
                         campaign_row_idx, total_shipping_cost_col_idx,
-                        f"={purchases_ref}*{shipping_rate}",
+                        f"=ROUND({purchases_ref}*{shipping_rate},2)",
                         campaign_format
                     )
                     
                     # Total Operational Cost = Purchases * operational_rate
                     worksheet.write_formula(
                         campaign_row_idx, total_operational_cost_col_idx,
-                        f"={purchases_ref}*{operational_rate}",
+                        f"=ROUND({purchases_ref}*{operational_rate},2)",
                         campaign_format
                     )
                     
                     # Net Profit = Net Revenue - Amount Spent (USD)*100 - Total Shipping Cost - Total Operational Cost - Total Product Cost
                     worksheet.write_formula(
                         campaign_row_idx, net_profit_col_idx,
-                        f"={net_revenue_ref}-{amount_spent_ref}*100-{total_shipping_cost_ref}-{total_operational_cost_ref}-{total_product_cost_ref}",
+                        f"=ROUND({net_revenue_ref}-{amount_spent_ref}*100-{total_shipping_cost_ref}-{total_operational_cost_ref}-{total_product_cost_ref},2)",
                         campaign_format
                     )
                     
                     # Net Profit (%) = Net Profit / Net Revenue * 100
                     worksheet.write_formula(
                         campaign_row_idx, net_profit_percent_col_idx,
-                        f"=IF({net_revenue_ref}=0,0,{net_profit_ref}/{net_revenue_ref}*100)",
+                        f"=ROUND(IF({net_revenue_ref}=0,0,{net_profit_ref}/{net_revenue_ref}*100),2)",
                         campaign_format
                     )
                 
@@ -2221,14 +2364,14 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                             sumproduct_formula = "+".join(price_terms)
                             worksheet.write_formula(
                                 campaign_row_idx, total_col_idx,
-                                f"=IF({total_purchases_ref}=0,0,({sumproduct_formula})/{total_purchases_ref})",
+                                f"=ROUND(IF({total_purchases_ref}=0,0,({sumproduct_formula})/{total_purchases_ref}),2)",
                                 campaign_format
                             )
                         else:
                             single_date_col = all_columns.index(f"{unique_dates[0]}_{metric}")
                             worksheet.write_formula(
                                 campaign_row_idx, total_col_idx,
-                                f"={xl_col_to_name(single_date_col)}{excel_row}",
+                                f"=ROUND({xl_col_to_name(single_date_col)}{excel_row},2)",
                                 campaign_format
                             )
                     
@@ -2247,14 +2390,14 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                             sumproduct_formula = "+".join(metric_terms)
                             worksheet.write_formula(
                                 campaign_row_idx, total_col_idx,
-                                f"=IF({total_purchases_ref}=0,0,({sumproduct_formula})/{total_purchases_ref})",
+                                f"=ROUND(IF({total_purchases_ref}=0,0,({sumproduct_formula})/{total_purchases_ref}),2)",
                                 campaign_format
                             )
                         else:
                             single_date_col = all_columns.index(f"{unique_dates[0]}_{metric}")
                             worksheet.write_formula(
                                 campaign_row_idx, total_col_idx,
-                                f"={xl_col_to_name(single_date_col)}{excel_row}",
+                                f"=ROUND({xl_col_to_name(single_date_col)}{excel_row},2)",
                                 campaign_format
                             )
                     
@@ -2267,7 +2410,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                         
                         worksheet.write_formula(
                             campaign_row_idx, total_col_idx,
-                            f"=IF({total_purchases_ref}=0,0,{total_amount_spent_ref}/{total_purchases_ref})",
+                            f"=ROUND(IF({total_purchases_ref}=0,0,{total_amount_spent_ref}/{total_purchases_ref}),2)",
                             campaign_format
                         )
                     
@@ -2280,7 +2423,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                         
                         worksheet.write_formula(
                             campaign_row_idx, total_col_idx,
-                            f"=IF({total_net_revenue_ref}=0,0,{total_net_profit_ref}/{total_net_revenue_ref}*100)",
+                            f"=ROUND(IF({total_net_revenue_ref}=0,0,{total_net_profit_ref}/{total_net_revenue_ref}*100),2)",
                             campaign_format
                         )
                     
@@ -2295,14 +2438,14 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                             sum_formula = "+".join(date_refs)
                             worksheet.write_formula(
                                 campaign_row_idx, total_col_idx,
-                                f"={sum_formula}",
+                                f"=ROUND({sum_formula},2)",
                                 campaign_format
                             )
                         else:
                             single_date_col = all_columns.index(f"{unique_dates[0]}_{metric}")
                             worksheet.write_formula(
                                 campaign_row_idx, total_col_idx,
-                                f"={xl_col_to_name(single_date_col)}{excel_row}",
+                                f"=ROUND({xl_col_to_name(single_date_col)}{excel_row},2)",
                                 campaign_format
                             )
                 
@@ -2327,7 +2470,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                             
                             worksheet.write_formula(
                                 product_total_row_idx, col_idx,
-                                f"=IF(SUM({purchases_range})=0,0,SUMPRODUCT({metric_range},{purchases_range})/SUM({purchases_range}))",
+                                f"=ROUND(IF(SUM({purchases_range})=0,0,SUMPRODUCT({metric_range},{purchases_range})/SUM({purchases_range})),2)",
                                 product_total_format
                             )
                         elif metric in ["Cost Per Purchase (USD)", "Net Profit (%)"]:
@@ -2337,7 +2480,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                                 purchases_idx = all_columns.index(f"{date}_Purchases")
                                 worksheet.write_formula(
                                     product_total_row_idx, col_idx,
-                                    f"=IF({xl_col_to_name(purchases_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(amount_spent_idx)}{product_total_row_idx+1}/{xl_col_to_name(purchases_idx)}{product_total_row_idx+1})",
+                                    f"=ROUND(IF({xl_col_to_name(purchases_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(amount_spent_idx)}{product_total_row_idx+1}/{xl_col_to_name(purchases_idx)}{product_total_row_idx+1}),2)",
                                     product_total_format
                                 )
                             else: # Net Profit (%)
@@ -2345,7 +2488,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                                 net_revenue_idx = all_columns.index(f"{date}_Net Revenue")
                                 worksheet.write_formula(
                                     product_total_row_idx, col_idx,
-                                    f"=IF({xl_col_to_name(net_revenue_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(net_profit_idx)}{product_total_row_idx+1}/{xl_col_to_name(net_revenue_idx)}{product_total_row_idx+1}*100)",
+                                    f"=ROUND(IF({xl_col_to_name(net_revenue_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(net_profit_idx)}{product_total_row_idx+1}/{xl_col_to_name(net_revenue_idx)}{product_total_row_idx+1}*100),2)",
                                     product_total_format
                                 )
                         else:
@@ -2370,7 +2513,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                         
                         worksheet.write_formula(
                             product_total_row_idx, col_idx,
-                            f"=IF(SUM({purchases_range})=0,0,SUMPRODUCT({metric_range},{purchases_range})/SUM({purchases_range}))",
+                            f"=ROUND(IF(SUM({purchases_range})=0,0,SUMPRODUCT({metric_range},{purchases_range})/SUM({purchases_range})),2)",
                             product_total_format
                         )
                     elif metric in ["Cost Per Purchase (USD)", "Net Profit (%)"]:
@@ -2380,7 +2523,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                             total_purchases_idx = all_columns.index("Total_Purchases")
                             worksheet.write_formula(
                                 product_total_row_idx, col_idx,
-                                f"=IF({xl_col_to_name(total_purchases_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(total_amount_spent_idx)}{product_total_row_idx+1}/{xl_col_to_name(total_purchases_idx)}{product_total_row_idx+1})",
+                                f"=ROUND(IF({xl_col_to_name(total_purchases_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(total_amount_spent_idx)}{product_total_row_idx+1}/{xl_col_to_name(total_purchases_idx)}{product_total_row_idx+1}),2)",
                                 product_total_format
                             )
                         else: # Net Profit (%)
@@ -2388,7 +2531,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                             total_net_revenue_idx = all_columns.index("Total_Net Revenue")
                             worksheet.write_formula(
                                 product_total_row_idx, col_idx,
-                                f"=IF({xl_col_to_name(total_net_revenue_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(total_net_profit_idx)}{product_total_row_idx+1}/{xl_col_to_name(total_net_revenue_idx)}{product_total_row_idx+1}*100)",
+                                f"=ROUND(IF({xl_col_to_name(total_net_revenue_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(total_net_profit_idx)}{product_total_row_idx+1}/{xl_col_to_name(total_net_revenue_idx)}{product_total_row_idx+1}*100),2)",
                                 product_total_format
                             )
                     else:
@@ -2396,7 +2539,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                         col_range = f"{xl_col_to_name(col_idx)}{first_campaign_row}:{xl_col_to_name(col_idx)}{last_campaign_row}"
                         worksheet.write_formula(
                             product_total_row_idx, col_idx,
-                            f"=SUM({col_range})",
+                            f"=ROUND(SUM({col_range}),2)",
                             product_total_format
                         )
 
@@ -2432,7 +2575,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                         
                         worksheet.write_formula(
                             grand_total_row_idx, col_idx,
-                            f"=IF(({sum_purchases_formula})=0,0,({sumproduct_formula})/({sum_purchases_formula}))",
+                            f"=ROUND(IF(({sum_purchases_formula})=0,0,({sumproduct_formula})/({sum_purchases_formula})),2)",
                             grand_total_format
                         )
                     elif metric in ["Cost Per Purchase (USD)", "Net Profit (%)"]:
@@ -2442,7 +2585,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                             purchases_idx = all_columns.index(f"{date}_Purchases")
                             worksheet.write_formula(
                                 grand_total_row_idx, col_idx,
-                                f"=IF({xl_col_to_name(purchases_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(amount_spent_idx)}{grand_total_row_idx+1}/{xl_col_to_name(purchases_idx)}{grand_total_row_idx+1})",
+                                f"=ROUND(IF({xl_col_to_name(purchases_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(amount_spent_idx)}{grand_total_row_idx+1}/{xl_col_to_name(purchases_idx)}{grand_total_row_idx+1}),2)",
                                 grand_total_format
                             )
                         else: # Net Profit (%)
@@ -2450,7 +2593,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                             net_revenue_idx = all_columns.index(f"{date}_Net Revenue")
                             worksheet.write_formula(
                                 grand_total_row_idx, col_idx,
-                                f"=IF({xl_col_to_name(net_revenue_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(net_profit_idx)}{grand_total_row_idx+1}/{xl_col_to_name(net_revenue_idx)}{grand_total_row_idx+1}*100)",
+                                f"=ROUND(IF({xl_col_to_name(net_revenue_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(net_profit_idx)}{grand_total_row_idx+1}/{xl_col_to_name(net_revenue_idx)}{grand_total_row_idx+1}*100),2)",
                                 grand_total_format
                             )
                     else:
@@ -2492,7 +2635,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                     
                     worksheet.write_formula(
                         grand_total_row_idx, col_idx,
-                        f"=IF(({sum_purchases_formula})=0,0,({sumproduct_formula})/({sum_purchases_formula}))",
+                        f"=ROUND(IF(({sum_purchases_formula})=0,0,({sumproduct_formula})/({sum_purchases_formula})),2)",
                         grand_total_format
                     )
                 elif metric in ["Cost Per Purchase (USD)", "Net Profit (%)"]:
@@ -2502,7 +2645,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                         total_purchases_idx = all_columns.index("Total_Purchases")
                         worksheet.write_formula(
                             grand_total_row_idx, col_idx,
-                            f"=IF({xl_col_to_name(total_purchases_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(total_amount_spent_idx)}{grand_total_row_idx+1}/{xl_col_to_name(total_purchases_idx)}{grand_total_row_idx+1})",
+                            f"=ROUND(IF({xl_col_to_name(total_purchases_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(total_amount_spent_idx)}{grand_total_row_idx+1}/{xl_col_to_name(total_purchases_idx)}{grand_total_row_idx+1}),2)",
                             grand_total_format
                         )
                     else: # Net Profit (%)
@@ -2510,7 +2653,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                         total_net_revenue_idx = all_columns.index("Total_Net Revenue")
                         worksheet.write_formula(
                             grand_total_row_idx, col_idx,
-                            f"=IF({xl_col_to_name(total_net_revenue_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(total_net_profit_idx)}{grand_total_row_idx+1}/{xl_col_to_name(total_net_revenue_idx)}{grand_total_row_idx+1}*100)",
+                            f"=ROUND(IF({xl_col_to_name(total_net_revenue_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(total_net_profit_idx)}{grand_total_row_idx+1}/{xl_col_to_name(total_net_revenue_idx)}{grand_total_row_idx+1}*100),2)",
                             grand_total_format
                         )
                 else:
@@ -2529,6 +2672,103 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
 
         # Freeze panes to keep base columns visible when scrolling
         worksheet.freeze_panes(2, len(base_columns))  # Freeze header and base columns
+        
+        # ==== NEW SHEET: Unmatched Campaigns ====
+        unmatched_sheet = workbook.add_worksheet("Unmatched Campaigns")
+        
+        # Formats for unmatched sheet
+        unmatched_header_format = workbook.add_format({
+            "bold": True, "align": "center", "valign": "vcenter",
+            "fg_color": "#FF9999", "font_name": "Calibri", "font_size": 11
+        })
+        unmatched_data_format = workbook.add_format({
+            "align": "left", "valign": "vcenter",
+            "fg_color": "#FFE6E6", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00"  # 2 decimal places
+        })
+        matched_summary_format = workbook.add_format({
+            "align": "left", "valign": "vcenter",
+            "fg_color": "#E6FFE6", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00"  # 2 decimal places
+        })
+        
+        # Headers for unmatched sheet
+        unmatched_headers = ["Status", "Product", "Campaign Name", "Amount Spent (USD)", 
+                           "Amount Spent (INR)", "Purchases", "Cost Per Purchase (USD)", "Dates Covered", "Reason"]
+        
+        for col_num, header in enumerate(unmatched_headers):
+            safe_write(unmatched_sheet, 0, col_num, header, unmatched_header_format)
+        
+        # Write summary first
+        summary_row = 1
+        safe_write(unmatched_sheet, summary_row, 0, "SUMMARY", unmatched_header_format)
+        safe_write(unmatched_sheet, summary_row + 1, 0, f"Total Campaigns: {len(matched_campaigns) + len(unmatched_campaigns)}", matched_summary_format)
+        safe_write(unmatched_sheet, summary_row + 2, 0, f"Matched with Shopify: {len(matched_campaigns)}", matched_summary_format)
+        safe_write(unmatched_sheet, summary_row + 3, 0, f"Unmatched with Shopify: {len(unmatched_campaigns)}", unmatched_data_format)
+        safe_write(unmatched_sheet, summary_row + 4, 0, f"Date Range: {min(unique_dates)} to {max(unique_dates)}" if unique_dates else "No dates found", matched_summary_format)
+        
+        # Write unmatched campaigns
+        current_row = summary_row + 6
+        
+        if unmatched_campaigns:
+            safe_write(unmatched_sheet, current_row, 0, "CAMPAIGNS WITHOUT SHOPIFY DATA", unmatched_header_format)
+            current_row += 1
+            
+            for campaign in unmatched_campaigns:
+                cost_per_purchase_usd = 0
+                if campaign['Purchases'] > 0:
+                    cost_per_purchase_usd = round(campaign['Amount Spent (USD)'] / campaign['Purchases'], 2)
+                
+                dates_str = ", ".join(campaign['Dates']) if campaign['Dates'] else "No dates"
+                
+                safe_write(unmatched_sheet, current_row, 0, "UNMATCHED", unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 1, campaign['Product'], unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 2, campaign['Campaign Name'], unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 3, campaign['Amount Spent (USD)'], unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 4, campaign['Amount Spent (INR)'], unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 5, campaign['Purchases'], unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 6, cost_per_purchase_usd, unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 7, dates_str, unmatched_data_format)
+                safe_write(unmatched_sheet, current_row, 8, "No matching Shopify day-wise data found", unmatched_data_format)
+                current_row += 1
+        
+        # Write matched campaigns summary
+        if matched_campaigns:
+            current_row += 2
+            safe_write(unmatched_sheet, current_row, 0, "CAMPAIGNS WITH SHOPIFY DATA (FOR REFERENCE)", unmatched_header_format)
+            current_row += 1
+            
+            for campaign in matched_campaigns[:10]:  # Show only first 10 to save space
+                cost_per_purchase_usd = 0
+                if campaign['Purchases'] > 0:
+                    cost_per_purchase_usd = round(campaign['Amount Spent (USD)'] / campaign['Purchases'], 2)
+                
+                dates_str = ", ".join(campaign['Dates']) if campaign['Dates'] else "No dates"
+                
+                safe_write(unmatched_sheet, current_row, 0, "MATCHED", matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 1, campaign['Product'], matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 2, campaign['Campaign Name'], matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 3, campaign['Amount Spent (USD)'], matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 4, campaign['Amount Spent (INR)'], matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 5, campaign['Purchases'], matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 6, cost_per_purchase_usd, matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 7, dates_str, matched_summary_format)
+                safe_write(unmatched_sheet, current_row, 8, "Successfully matched with Shopify day-wise data", matched_summary_format)
+                current_row += 1
+            
+            if len(matched_campaigns) > 10:
+                safe_write(unmatched_sheet, current_row, 0, f"... and {len(matched_campaigns) - 10} more matched campaigns", matched_summary_format)
+        
+        # Set column widths for unmatched sheet
+        unmatched_sheet.set_column(0, 0, 12)  # Status
+        unmatched_sheet.set_column(1, 1, 25)  # Product
+        unmatched_sheet.set_column(2, 2, 35)  # Campaign Name
+        unmatched_sheet.set_column(3, 3, 18)  # Amount USD
+        unmatched_sheet.set_column(4, 4, 18)  # Amount INR
+        unmatched_sheet.set_column(5, 5, 12)  # Purchases
+        unmatched_sheet.set_column(6, 6, 20)  # Cost Per Purchase USD
+        unmatched_sheet.set_column(7, 7, 25)  # Dates Covered
+        unmatched_sheet.set_column(8, 8, 40)  # Reason
         
     return output.getvalue()
 
@@ -2628,17 +2868,6 @@ if campaign_files or shopify_files or old_merged_files:
         unique_dates = df_shopify['Date'].unique()
         unique_dates = [str(d) for d in unique_dates if pd.notna(d) and str(d).strip() != '']
         st.info(f"📅 Found {len(unique_dates)} unique dates: {', '.join(sorted(unique_dates)[:5])}{'...' if len(unique_dates) > 5 else ''}")
-
-st.markdown("---")
-st.markdown("**✨ FIXED VERSION with Proper Weighted Averages** 🚀")
-st.markdown("**Key Fixes Applied:**")
-st.markdown("- ✅ **Average price columns moved to date-wise structure** - no longer at the beginning")
-st.markdown("- ✅ **Fixed delivery rate calculation** - weighted average based on total net items sold across all dates")
-st.markdown("- ✅ **Fixed product cost calculation** - weighted average based on total net items sold across all dates")  
-st.markdown("- ✅ **Fixed average price calculation** - weighted average per date, with fallback to simple average when all net items = 0")
-st.markdown("- ✅ **Proper Excel formulas** - all calculations update automatically when inputs change")
-st.markdown("- ✅ **Consistent structure** - date-specific columns grouped together, totals at the end")
-
 
 
 
