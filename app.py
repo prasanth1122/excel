@@ -988,7 +988,6 @@ def convert_shopify_to_excel(df):
     return output.getvalue()
 
 
-
 def convert_shopify_to_excel_with_date_columns_fixed(df):
     """Convert Shopify data to Excel with collapsible column groups every 12 columns after base columns"""
     if df is None or df.empty:
@@ -999,6 +998,19 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
         workbook = writer.book
         worksheet = workbook.add_worksheet("Shopify Data")
         writer.sheets["Shopify Data"] = worksheet
+
+        # Check if we have dates
+        has_dates = 'Date' in df.columns
+        if not has_dates:
+            # Fall back to original structure if no dates
+            return convert_shopify_to_excel(df)
+        
+        # Get unique dates and sort them
+        unique_dates = sorted([str(d) for d in df['Date'].unique() if pd.notna(d) and str(d).strip() != ''])
+        num_days = len(unique_dates)
+        
+        # Calculate dynamic threshold
+        dynamic_threshold = num_days * 5
 
         # Formats with conditional formatting based on net items sold
         header_format = workbook.add_format({
@@ -1022,32 +1034,20 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
             "num_format": "#,##0.00"
         })
         
-        # Conditional formats for different net items sold ranges
-        # Format for products with < 15 net items sold (Red theme)
+        # Dynamic conditional formats based on calculated threshold (simplified to 2 categories)
+        # Format for products with < dynamic_threshold net items sold (Red theme)
         product_total_format_low = workbook.add_format({
             "bold": True, "align": "left", "valign": "vcenter",
-            "fg_color": "#FFB3B3", "font_name": "Calibri", "font_size": 11,  # Light red
+            "fg_color": "#DC4E23", "font_name": "Calibri", "font_size": 11,  # Red
             "num_format": "#,##0.00"
         })
         variant_format_low = workbook.add_format({
             "align": "left", "valign": "vcenter",
-            "fg_color": "#FFD6D6", "font_name": "Calibri", "font_size": 11,  # Very light red
+            "fg_color": "#FFCCCB", "font_name": "Calibri", "font_size": 11,  # Light red
             "num_format": "#,##0.00"
         })
         
-        # Format for products with 15-50 net items sold (Yellow theme)
-        product_total_format_medium = workbook.add_format({
-            "bold": True, "align": "left", "valign": "vcenter",
-            "fg_color": "#FFEB9C", "font_name": "Calibri", "font_size": 11,  # Light yellow
-            "num_format": "#,##0.00"
-        })
-        variant_format_medium = workbook.add_format({
-            "align": "left", "valign": "vcenter",
-            "fg_color": "#FFF2CC", "font_name": "Calibri", "font_size": 11,  # Very light yellow
-            "num_format": "#,##0.00"
-        })
-        
-        # Format for products with > 50 net items sold (Default blue theme)
+        # Format for products with >= dynamic_threshold net items sold (Default theme)
         product_total_format_high = workbook.add_format({
             "bold": True, "align": "left", "valign": "vcenter",
             "fg_color": "#FFD966", "font_name": "Calibri", "font_size": 11,
@@ -1058,15 +1058,6 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
             "fg_color": "#D9E1F2", "font_name": "Calibri", "font_size": 11,
             "num_format": "#,##0.00"
         })
-
-        # Check if we have dates
-        has_dates = 'Date' in df.columns
-        if not has_dates:
-            # Fall back to original structure if no dates
-            return convert_shopify_to_excel(df)
-        
-        # Get unique dates and sort them
-        unique_dates = sorted([str(d) for d in df['Date'].unique() if pd.notna(d) and str(d).strip() != ''])
         
         # Define base columns (A, B, C, D, E - columns 0, 1, 2, 3, 4)
         base_columns = ["Product title", "Product variant title", "Delivery Rate", "Product Cost (Input)", "Net items sold"]
@@ -1176,13 +1167,10 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                     net_items = row_data.get("Net items sold", 0) or 0
                     total_net_items_for_product += net_items
             
-            # Choose formatting based on total net items sold
-            if total_net_items_for_product < 15:
+            # Choose formatting based on dynamic threshold (simplified to 2 categories)
+            if total_net_items_for_product < dynamic_threshold:
                 product_total_format = product_total_format_low
                 variant_format = variant_format_low
-            elif 15 <= total_net_items_for_product <= 50:
-                product_total_format = product_total_format_medium
-                variant_format = variant_format_medium
             else:
                 product_total_format = product_total_format_high
                 variant_format = variant_format_high
@@ -2086,8 +2074,8 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
         # Get unique dates and sort them
         unique_dates = sorted([str(d) for d in df['Date'].unique() if pd.notna(d) and str(d).strip() != ''])
         
-        # Define base columns
-        base_columns = ["Product Name", "Campaign Name"]
+        # Define base columns - NOW INCLUDING "Total Amount Spent (USD)" as 3rd column
+        base_columns = ["Product Name", "Campaign Name", "Total Amount Spent (USD)"]
         
         # Define metrics that will be repeated for each date (13 metrics = 13 columns per date)
         date_metrics = ["Avg Price", "Delivery Rate", "Product Cost Input", "Amount Spent (USD)", "Purchases", "Cost Per Purchase (USD)", 
@@ -2124,7 +2112,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                 safe_write(worksheet, 0, col_num, col_name, header_format)
 
         # SET UP COLUMN GROUPING
-        start_col = 3  # Column D (after base columns A, B + separator C)
+        start_col = 4  # Column E (after base columns A, B, C + separator D)
         total_columns = len(all_columns)
         
         group_level = 1
@@ -2155,7 +2143,8 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
         # Set base column widths
         worksheet.set_column(0, 0, 25)  # Product Name
         worksheet.set_column(1, 1, 30)  # Campaign Name
-        worksheet.set_column(2, 2, 3)   # Separator column
+        worksheet.set_column(2, 2, 20)  # Total Amount Spent (USD)
+        worksheet.set_column(3, 3, 3)   # Separator column
 
         # Configure outline settings
         worksheet.outline_settings(
@@ -2188,6 +2177,10 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
             # Product total row
             safe_write(worksheet, product_total_row_idx, 0, product, product_total_format)
             safe_write(worksheet, product_total_row_idx, 1, "ALL CAMPAIGNS (TOTAL)", product_total_format)
+            
+            # Calculate and write total amount spent for this product
+            product_total_amount_spent = product_df.get("Amount Spent (USD)", 0).sum() if "Amount Spent (USD)" in product_df.columns else 0
+            safe_write(worksheet, product_total_row_idx, 2, round(float(product_total_amount_spent), 2), product_total_format)
 
             # Group campaigns within product
             campaign_rows = []
@@ -2220,6 +2213,8 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                 # Fill base columns for campaign
                 safe_write(worksheet, campaign_row_idx, 0, product, campaign_format)
                 safe_write(worksheet, campaign_row_idx, 1, campaign_name, campaign_format)
+                # Leave Total Amount Spent (USD) column empty for individual campaign rows
+                safe_write(worksheet, campaign_row_idx, 2, "", campaign_format)
                 
                 # Cell references for Excel formulas
                 excel_row = campaign_row_idx + 1
@@ -2549,6 +2544,19 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
             safe_write(worksheet, grand_total_row_idx, 0, "ALL PRODUCTS", grand_total_format)
             safe_write(worksheet, grand_total_row_idx, 1, "GRAND TOTAL", grand_total_format)
             
+            # Calculate and write grand total amount spent using product total rows
+            grand_total_amount_spent_refs = []
+            for product_row_idx in product_total_rows:
+                product_excel_row = product_row_idx + 1
+                grand_total_amount_spent_refs.append(f"C{product_excel_row}")  # Column C is Total Amount Spent (USD)
+            
+            grand_total_amount_spent_formula = "+".join(grand_total_amount_spent_refs)
+            worksheet.write_formula(
+                grand_total_row_idx, 2,
+                f"={grand_total_amount_spent_formula}",
+                grand_total_format
+            )
+            
             # Date-specific and total columns for grand total using INDIVIDUAL PRODUCT ROWS
             for date in unique_dates:
                 for metric in date_metrics:
@@ -2771,8 +2779,6 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
         unmatched_sheet.set_column(8, 8, 40)  # Reason
         
     return output.getvalue()
-
-
 
 
 
