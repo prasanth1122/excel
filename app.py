@@ -1268,7 +1268,7 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                 safe_write(worksheet, variant_row_idx, 4, "", variant_format)
                 safe_write(worksheet, variant_row_idx, 5, "", variant_format)
                 safe_write(worksheet, variant_row_idx, 6, "", variant_format)
-                safe_write(worksheet, variant_row_idx, 7, "", variant_format)
+                safe_write(worksheet, variant_row_idx, 7, "", variant_format)  # BE will reference product total
                 
                 # Cell references for Excel formulas
                 excel_row = variant_row_idx + 1
@@ -1588,22 +1588,7 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                     variant_format
                 )
                 
-                # BE (Break Even per Item) = (Total Net Revenue - Total Shipping Cost - Total Operational Cost - Total Product Cost) / 100 / Net items sold
-                total_net_revenue_col_idx = all_columns.index("Total_Net Revenue")
-                total_shipping_cost_col_idx = all_columns.index("Total_Shipping Cost")
-                total_operational_cost_col_idx = all_columns.index("Total_Operational Cost")
-                total_product_cost_col_idx = all_columns.index("Total_Product Cost (Output)")
-                
-                total_net_revenue_ref = f"{xl_col_to_name(total_net_revenue_col_idx)}{excel_row}"
-                total_shipping_cost_ref = f"{xl_col_to_name(total_shipping_cost_col_idx)}{excel_row}"
-                total_operational_cost_ref = f"{xl_col_to_name(total_operational_cost_col_idx)}{excel_row}"
-                total_product_cost_ref = f"{xl_col_to_name(total_product_cost_col_idx)}{excel_row}"
-                
-                worksheet.write_formula(
-                    variant_row_idx, 7,
-                    f"=ROUND(IF(AND({total_net_revenue_ref}>0,{xl_col_to_name(total_net_items_col_idx)}{excel_row}>0),({total_net_revenue_ref}-{total_shipping_cost_ref}-{total_operational_cost_ref}-{total_product_cost_ref})/100/{xl_col_to_name(total_net_items_col_idx)}{excel_row},0),2)",
-                    variant_format
-                )
+                # BE - REMOVED: Don't calculate BE for individual variants, will reference product total later
                 
                 row += 1
             
@@ -1636,22 +1621,33 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                     product_total_format
                 )
                 
-                # BE for product total (per item)
+                # BE for product total (per item) - CHANGED: Use Delivered Orders instead of Net items sold for consistency with Campaign
                 total_net_revenue_col_idx = all_columns.index("Total_Net Revenue")
                 total_shipping_cost_col_idx = all_columns.index("Total_Shipping Cost")
                 total_operational_cost_col_idx = all_columns.index("Total_Operational Cost")
                 total_product_cost_col_idx = all_columns.index("Total_Product Cost (Output)")
+                total_delivered_orders_col_idx = all_columns.index("Total_Delivered Orders")  # CHANGED: Use Delivered Orders
                 
                 total_net_revenue_ref = f"{xl_col_to_name(total_net_revenue_col_idx)}{product_total_row_idx+1}"
                 total_shipping_cost_ref = f"{xl_col_to_name(total_shipping_cost_col_idx)}{product_total_row_idx+1}"
                 total_operational_cost_ref = f"{xl_col_to_name(total_operational_cost_col_idx)}{product_total_row_idx+1}"
                 total_product_cost_ref = f"{xl_col_to_name(total_product_cost_col_idx)}{product_total_row_idx+1}"
+                total_delivered_orders_ref = f"{xl_col_to_name(total_delivered_orders_col_idx)}{product_total_row_idx+1}"
                 
                 worksheet.write_formula(
                     product_total_row_idx, 7,
-                    f"=ROUND(IF(AND({total_net_revenue_ref}>0,{xl_col_to_name(total_net_items_col_idx)}{product_total_row_idx+1}>0),({total_net_revenue_ref}-{total_shipping_cost_ref}-{total_operational_cost_ref}-{total_product_cost_ref})/100/{xl_col_to_name(total_net_items_col_idx)}{product_total_row_idx+1},0),2)",
+                    f"=ROUND(IF(AND({total_net_revenue_ref}>0,{total_delivered_orders_ref}>0),({total_net_revenue_ref}-{total_shipping_cost_ref}-{total_operational_cost_ref}-{total_product_cost_ref})/100/{total_delivered_orders_ref},0),2)",
                     product_total_format
                 )
+                
+                # AFTER calculating product BE, copy this value to ALL variant rows under this product
+                product_be_ref = f"H{product_total_row_idx+1}"  # H is column 7 (BE column)
+                for variant_row_idx in variant_rows:
+                    worksheet.write_formula(
+                        variant_row_idx, 7,
+                        f"={product_be_ref}",
+                        variant_format
+                    )
                 
                 # PRODUCT TOTAL CALCULATIONS (with ROUND for 2 decimal places)
                 for date in unique_dates:
@@ -1801,20 +1797,22 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                 grand_total_format
             )
             
-            # BE for grand total (per item)
+            # BE for grand total (per item) - CHANGED: Use Delivered Orders for consistency with Campaign
             total_net_revenue_col_idx = all_columns.index("Total_Net Revenue")
             total_shipping_cost_col_idx = all_columns.index("Total_Shipping Cost")
             total_operational_cost_col_idx = all_columns.index("Total_Operational Cost")
             total_product_cost_col_idx = all_columns.index("Total_Product Cost (Output)")
+            total_delivered_orders_col_idx = all_columns.index("Total_Delivered Orders")  # CHANGED: Use Delivered Orders
             
             total_net_revenue_ref = f"{xl_col_to_name(total_net_revenue_col_idx)}{grand_total_row_idx+1}"
             total_shipping_cost_ref = f"{xl_col_to_name(total_shipping_cost_col_idx)}{grand_total_row_idx+1}"
             total_operational_cost_ref = f"{xl_col_to_name(total_operational_cost_col_idx)}{grand_total_row_idx+1}"
             total_product_cost_ref = f"{xl_col_to_name(total_product_cost_col_idx)}{grand_total_row_idx+1}"
+            total_delivered_orders_ref = f"{xl_col_to_name(total_delivered_orders_col_idx)}{grand_total_row_idx+1}"
             
             worksheet.write_formula(
                 grand_total_row_idx, base_be_col,
-                f"=ROUND(IF(AND({total_net_revenue_ref}>0,{xl_col_to_name(total_net_items_col_idx)}{grand_total_row_idx+1}>0),({total_net_revenue_ref}-{total_shipping_cost_ref}-{total_operational_cost_ref}-{total_product_cost_ref})/100/{xl_col_to_name(total_net_items_col_idx)}{grand_total_row_idx+1},0),2)",
+                f"=ROUND(IF(AND({total_net_revenue_ref}>0,{total_delivered_orders_ref}>0),({total_net_revenue_ref}-{total_shipping_cost_ref}-{total_operational_cost_ref}-{total_product_cost_ref})/100/{total_delivered_orders_ref},0),2)",
                 grand_total_format
             )
             
@@ -1944,8 +1942,6 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
         worksheet.freeze_panes(2, len(base_columns))  # Freeze header and base columns
     
     return output.getvalue()
-
-
 
 def convert_final_campaign_to_excel(df, original_campaign_df=None):
     """Original Campaign Excel conversion function (fallback)"""
@@ -2187,7 +2183,6 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
     return output.getvalue()
 
 
-
 def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None):
     """Convert Campaign data to Excel with day-wise lookups integrated and unmatched campaigns sheet"""
     if df.empty:
@@ -2412,7 +2407,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                 safe_write(worksheet, campaign_row_idx, 2, "", campaign_format)
                 safe_write(worksheet, campaign_row_idx, 3, "", campaign_format)
                 safe_write(worksheet, campaign_row_idx, 4, "", campaign_format)
-                safe_write(worksheet, campaign_row_idx, 5, "", campaign_format)
+                safe_write(worksheet, campaign_row_idx, 5, "", campaign_format)  # BE will reference product total
                 
                 # Add remark for campaigns with total amount spent USD = 0
                 if total_amount_spent_usd == 0:
@@ -2672,31 +2667,8 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                     campaign_format
                 )
                 
-                # BE (Amount Spent Zero Net Profit % per purchase) - Calculate amount spent needed for 0% net profit per purchase
-                # For Net Profit % = 0, we need: Net Profit = 0
-                # Net Profit = Net Revenue - Amount Spent*100 - Fixed Costs - Product Costs = 0
-                # Amount Spent per purchase = (Net Revenue - Fixed Costs - Product Costs) / 100 / Total Purchases
-                
-                total_net_revenue_col_idx = all_columns.index("Total_Net Revenue")
-                total_shipping_cost_col_idx = all_columns.index("Total_Total Shipping Cost")
-                total_operational_cost_col_idx = all_columns.index("Total_Total Operational Cost")
-                total_product_cost_col_idx = all_columns.index("Total_Total Product Cost")
-                total_purchases_col_idx = all_columns.index("Total_Purchases")
-                
-                total_net_revenue_ref = f"{xl_col_to_name(total_net_revenue_col_idx)}{excel_row}"
-                total_shipping_cost_ref = f"{xl_col_to_name(total_shipping_cost_col_idx)}{excel_row}"
-                total_operational_cost_ref = f"{xl_col_to_name(total_operational_cost_col_idx)}{excel_row}"
-                total_product_cost_ref = f"{xl_col_to_name(total_product_cost_col_idx)}{excel_row}"
-                total_purchases_ref = f"{xl_col_to_name(total_purchases_col_idx)}{excel_row}"
-                
-                zero_net_profit_formula = f'''=ROUND(IF(AND({total_net_revenue_ref}>0,{total_purchases_ref}>0),
-                    ({total_net_revenue_ref}-{total_shipping_cost_ref}-{total_operational_cost_ref}-{total_product_cost_ref})/100/{total_purchases_ref},0),2)'''
-                
-                worksheet.write_formula(
-                    campaign_row_idx, 5,
-                    zero_net_profit_formula,
-                    campaign_format
-                )
+                # BE - CHANGED: Reference the product total BE value instead of calculating individually
+                # This will be filled after product total BE is calculated
                 
                 row += 1
             
@@ -2729,27 +2701,36 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                     product_total_format
                 )
                 
-                # BE (Amount Spent Zero Net Profit % per purchase) for product total
+                # BE (Amount Spent Zero Net Profit % per delivered order) for product total - CHANGED: Use Delivered Orders
                 total_net_revenue_col_idx = all_columns.index("Total_Net Revenue")
                 total_shipping_cost_col_idx = all_columns.index("Total_Total Shipping Cost")
                 total_operational_cost_col_idx = all_columns.index("Total_Total Operational Cost")
                 total_product_cost_col_idx = all_columns.index("Total_Total Product Cost")
-                total_purchases_col_idx = all_columns.index("Total_Purchases")
+                total_delivered_orders_col_idx = all_columns.index("Total_Delivered Orders")  # CHANGED: Use Delivered Orders instead of Purchases
                 
                 total_net_revenue_ref = f"{xl_col_to_name(total_net_revenue_col_idx)}{product_total_row_idx+1}"
                 total_shipping_cost_ref = f"{xl_col_to_name(total_shipping_cost_col_idx)}{product_total_row_idx+1}"
                 total_operational_cost_ref = f"{xl_col_to_name(total_operational_cost_col_idx)}{product_total_row_idx+1}"
                 total_product_cost_ref = f"{xl_col_to_name(total_product_cost_col_idx)}{product_total_row_idx+1}"
-                total_purchases_ref = f"{xl_col_to_name(total_purchases_col_idx)}{product_total_row_idx+1}"
+                total_delivered_orders_ref = f"{xl_col_to_name(total_delivered_orders_col_idx)}{product_total_row_idx+1}"
                 
-                zero_net_profit_formula = f'''=ROUND(IF(AND({total_net_revenue_ref}>0,{total_purchases_ref}>0),
-                    ({total_net_revenue_ref}-{total_shipping_cost_ref}-{total_operational_cost_ref}-{total_product_cost_ref})/100/{total_purchases_ref},0),2)'''
+                zero_net_profit_formula = f'''=ROUND(IF(AND({total_net_revenue_ref}>0,{total_delivered_orders_ref}>0),
+                    ({total_net_revenue_ref}-{total_shipping_cost_ref}-{total_operational_cost_ref}-{total_product_cost_ref})/100/{total_delivered_orders_ref},0),2)'''
                 
                 worksheet.write_formula(
                     product_total_row_idx, 5,
                     zero_net_profit_formula,
                     product_total_format
                 )
+                
+                # AFTER calculating product BE, copy this value to ALL campaign rows under this product
+                product_be_ref = f"F{product_total_row_idx+1}"  # F is column 5 (BE column)
+                for campaign_row_idx in campaign_rows:
+                    worksheet.write_formula(
+                        campaign_row_idx, 5,
+                        f"={product_be_ref}",
+                        campaign_format
+                    )
                 
                 # PRODUCT TOTAL CALCULATIONS (similar to existing logic but with day-wise data)
                 for date in unique_dates:
@@ -2864,21 +2845,21 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                 grand_total_format
             )
             
-            # BE (Amount Spent Zero Net Profit % per purchase) for grand total
+            # BE (Amount Spent Zero Net Profit % per delivered order) for grand total - CHANGED: Use Delivered Orders
             total_net_revenue_col_idx = all_columns.index("Total_Net Revenue")
             total_shipping_cost_col_idx = all_columns.index("Total_Total Shipping Cost")
             total_operational_cost_col_idx = all_columns.index("Total_Total Operational Cost")
             total_product_cost_col_idx = all_columns.index("Total_Total Product Cost")
-            total_purchases_col_idx = all_columns.index("Total_Purchases")
+            total_delivered_orders_col_idx = all_columns.index("Total_Delivered Orders")  # CHANGED: Use Delivered Orders instead of Purchases
             
             total_net_revenue_ref = f"{xl_col_to_name(total_net_revenue_col_idx)}{grand_total_row_idx+1}"
             total_shipping_cost_ref = f"{xl_col_to_name(total_shipping_cost_col_idx)}{grand_total_row_idx+1}"
             total_operational_cost_ref = f"{xl_col_to_name(total_operational_cost_col_idx)}{grand_total_row_idx+1}"
             total_product_cost_ref = f"{xl_col_to_name(total_product_cost_col_idx)}{grand_total_row_idx+1}"
-            total_purchases_ref = f"{xl_col_to_name(total_purchases_col_idx)}{grand_total_row_idx+1}"
+            total_delivered_orders_ref = f"{xl_col_to_name(total_delivered_orders_col_idx)}{grand_total_row_idx+1}"
             
-            zero_net_profit_formula = f'''=ROUND(IF(AND({total_net_revenue_ref}>0,{total_purchases_ref}>0),
-                ({total_net_revenue_ref}-{total_shipping_cost_ref}-{total_operational_cost_ref}-{total_product_cost_ref})/100/{total_purchases_ref},0),2)'''
+            zero_net_profit_formula = f'''=ROUND(IF(AND({total_net_revenue_ref}>0,{total_delivered_orders_ref}>0),
+                ({total_net_revenue_ref}-{total_shipping_cost_ref}-{total_operational_cost_ref}-{total_product_cost_ref})/100/{total_delivered_orders_ref},0),2)'''
             
             worksheet.write_formula(
                 grand_total_row_idx, 5,
@@ -3116,9 +3097,6 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
         
     return output.getvalue()
 
-
-
-
 # ---- DOWNLOAD SECTIONS ----
 st.header("📥 Download Processed Files")
 
@@ -3211,7 +3189,6 @@ if campaign_files or shopify_files or old_merged_files:
         unique_dates = df_shopify['Date'].unique()
         unique_dates = [str(d) for d in unique_dates if pd.notna(d) and str(d).strip() != '']
         st.info(f"📅 Found {len(unique_dates)} unique dates: {', '.join(sorted(unique_dates)[:5])}{'...' if len(unique_dates) > 5 else ''}")
-
 
 
 
