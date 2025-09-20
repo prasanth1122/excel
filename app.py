@@ -506,21 +506,64 @@ if shopify_files:
             lambda x: fuzzy_match_to_campaign(x, campaign_products)
         )
 
-        # ---- ALLOCATE AD SPEND (considering dates if available) ----
-        if grouped_campaign is not None:
-            ad_spend_map = dict(zip(grouped_campaign["Product"], grouped_campaign["Total Amount Spent (INR)"]))
+        # ---- CORRECTED AD SPEND ALLOCATION (DAY-WISE DISTRIBUTION) ----
+        if grouped_campaign is not None and df_campaign is not None:
+            # Create campaign spend lookup by product and date
+            campaign_spend_by_product_date = {}
             
-            has_shopify_dates = 'Date' in df_shopify.columns
-
-            for product, product_df in df_shopify.groupby("Canonical Product"):
-                total_items = product_df["Net items sold"].sum()
-                if total_items > 0 and product in ad_spend_map:
-                    total_spend_inr = ad_spend_map[product]
-                    total_spend_usd = total_spend_inr / 100  # Convert to USD for display
+            # First, build the campaign spend lookup from df_campaign (which has dates)
+            if 'Date' in df_campaign.columns:
+                for _, row in df_campaign.iterrows():
+                    product = row['Canonical Product']
+                    date = str(row['Date'])
+                    amount_usd = row['Amount spent (USD)']
                     
-                    # Allocate spend based on items sold
-                    ratio = product_df["Net items sold"] / total_items
-                    df_shopify.loc[product_df.index, "Ad Spend (USD)"] = total_spend_usd * ratio
+                    if product not in campaign_spend_by_product_date:
+                        campaign_spend_by_product_date[product] = {}
+                    
+                    if date not in campaign_spend_by_product_date[product]:
+                        campaign_spend_by_product_date[product][date] = 0
+                    
+                    campaign_spend_by_product_date[product][date] += amount_usd
+            
+            # Now allocate ad spend to Shopify variants based on their share of items sold per product per date
+            for product, product_df in df_shopify.groupby("Canonical Product"):
+                if product in campaign_spend_by_product_date:
+                    # For each date, calculate total items sold by this product on that date
+                    for date in campaign_spend_by_product_date[product].keys():
+                        date_campaign_spend_usd = campaign_spend_by_product_date[product][date]
+                        
+                        # Get all variants of this product sold on this date
+                        product_date_variants = product_df[product_df['Date'].astype(str) == date]
+                        
+                        if not product_date_variants.empty:
+                            total_items_on_date = product_date_variants['Net items sold'].sum()
+                            
+                            if total_items_on_date > 0:
+                                # Distribute the campaign spend for this date proportionally
+                                for idx, variant_row in product_date_variants.iterrows():
+                                    variant_items = variant_row['Net items sold']
+                                    variant_share = variant_items / total_items_on_date
+                                    variant_ad_spend_usd = date_campaign_spend_usd * variant_share
+                                    
+                                    # Update the ad spend for this specific variant on this date
+                                    df_shopify.loc[idx, "Ad Spend (USD)"] = variant_ad_spend_usd
+            
+            # For products without date-specific campaign data, fall back to total allocation
+            ad_spend_map = dict(zip(grouped_campaign["Product"], grouped_campaign["Total Amount Spent (USD)"]))
+            
+            for product, product_df in df_shopify.groupby("Canonical Product"):
+                # Only allocate total spend for variants that don't have date-specific allocation
+                variants_without_date_allocation = product_df[product_df["Ad Spend (USD)"] == 0]
+                
+                if not variants_without_date_allocation.empty and product in ad_spend_map:
+                    total_items = variants_without_date_allocation["Net items sold"].sum()
+                    if total_items > 0:
+                        total_spend_usd = ad_spend_map[product]
+                        
+                        # Allocate spend based on items sold
+                        ratio = variants_without_date_allocation["Net items sold"] / total_items
+                        df_shopify.loc[variants_without_date_allocation.index, "Ad Spend (USD)"] = total_spend_usd * ratio
 
         # ---- SORT PRODUCTS BY NET ITEMS SOLD (DESC) ----
         product_order = (
@@ -539,7 +582,7 @@ if shopify_files:
             
         df_shopify = df_shopify.sort_values(by=sort_cols).reset_index(drop=True)
 
-        st.subheader("🛒 Merged Shopify Data with Ad Spend (USD) & Date Grouping")
+        st.subheader("🛒 Merged Shopify Data with CORRECTED Ad Spend (USD) & Date Grouping")
         
         # Show delivery rate and product cost import summary
         if df_old_merged is not None:
@@ -560,9 +603,16 @@ if shopify_files:
             unique_dates = [str(d) for d in unique_dates if pd.notna(d) and str(d).strip() != '']
             st.info(f"📅 Found {len(unique_dates)} unique dates in Shopify data: {', '.join(sorted(unique_dates)[:5])}{'...' if len(unique_dates) > 5 else ''}")
         
+        # Show ad spend verification
+        total_shopify_ad_spend = df_shopify["Ad Spend (USD)"].sum()
+        total_campaign_spend = grouped_campaign["Total Amount Spent (USD)"].sum() if grouped_campaign is not None else 0
+        st.info(f"💰 Ad Spend Verification: Shopify Total = ${total_shopify_ad_spend:.2f}, Campaign Total = ${total_campaign_spend:.2f}")
+        
         # Display without internal columns
         display_cols = [col for col in df_shopify.columns if col not in ["Product Name", "Canonical Product"]]
         st.write(df_shopify[display_cols])
+
+
 
 # ---- CREATE DAY-WISE LOOKUPS FROM SHOPIFY DATA ----
 # This is the key addition - creating lookups organized by product and date
@@ -3066,6 +3116,9 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
         
     return output.getvalue()
 
+
+
+
 # ---- DOWNLOAD SECTIONS ----
 st.header("📥 Download Processed Files")
 
@@ -3158,6 +3211,7 @@ if campaign_files or shopify_files or old_merged_files:
         unique_dates = df_shopify['Date'].unique()
         unique_dates = [str(d) for d in unique_dates if pd.notna(d) and str(d).strip() != '']
         st.info(f"📅 Found {len(unique_dates)} unique dates: {', '.join(sorted(unique_dates)[:5])}{'...' if len(unique_dates) > 5 else ''}")
+
 
 
 
