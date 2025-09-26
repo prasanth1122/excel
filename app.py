@@ -753,6 +753,34 @@ if df_shopify is not None and not df_shopify.empty:
             avg_product_cost_lookup[product] = weighted_avg_cost
 
 
+unique_campaign_dates = []
+if campaign_files and df_campaign is not None and 'Date' in df_campaign.columns:
+    unique_campaign_dates = sorted([str(d) for d in df_campaign['Date'].unique() if pd.notna(d) and str(d).strip() != ''])
+
+# Calculate default value based on number of unique dates
+if len(unique_campaign_dates) > 0:
+    n_days = len(unique_campaign_dates)
+    if n_days % 2 == 0:
+        default_days = n_days // 2  # Even: n/2
+    else:
+        default_days = (n_days + 1) // 2  # Odd: (n+1)/2
+    
+    st.info(f"📅 Found {n_days} unique dates in campaign data")
+    
+    # Input slider for selecting number of days
+    selected_days = st.slider(
+        "Select number of days to check for negative scores (random, not consecutive)",
+        min_value=1,
+        max_value=n_days,
+        value=default_days,
+        help=f"Default is {default_days} days (n/2 for even or (n+1)/2 for odd number of total days). "
+             f"The analysis will check if campaigns have negative scores in this many days randomly distributed across all dates."
+    )
+    
+    st.write(f"**Analysis will check:** {selected_days} out of {n_days} total days for negative scores (random distribution)")
+else:
+    selected_days = 1  # Default fallback
+    st.warning("⚠️ No campaign dates found. Using default value of 1 day.")
 
 
 
@@ -1626,7 +1654,7 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
                 total_shipping_cost_col_idx = all_columns.index("Total_Shipping Cost")
                 total_operational_cost_col_idx = all_columns.index("Total_Operational Cost")
                 total_product_cost_col_idx = all_columns.index("Total_Product Cost (Output)")
-                total_delivered_orders_col_idx = all_columns.index("Total_Delivered Orders")  # CHANGED: Use Delivered Orders
+                total_delivered_orders_col_idx = all_columns.index("Total_Net items sold")  # CHANGED: Use Delivered Orders
                 
                 total_net_revenue_ref = f"{xl_col_to_name(total_net_revenue_col_idx)}{product_total_row_idx+1}"
                 total_shipping_cost_ref = f"{xl_col_to_name(total_shipping_cost_col_idx)}{product_total_row_idx+1}"
@@ -1802,7 +1830,7 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
             total_shipping_cost_col_idx = all_columns.index("Total_Shipping Cost")
             total_operational_cost_col_idx = all_columns.index("Total_Operational Cost")
             total_product_cost_col_idx = all_columns.index("Total_Product Cost (Output)")
-            total_delivered_orders_col_idx = all_columns.index("Total_Delivered Orders")  # CHANGED: Use Delivered Orders
+            total_delivered_orders_col_idx = all_columns.index("Total_Net items sold")  # CHANGED: Use Delivered Orders
             
             total_net_revenue_ref = f"{xl_col_to_name(total_net_revenue_col_idx)}{grand_total_row_idx+1}"
             total_shipping_cost_ref = f"{xl_col_to_name(total_shipping_cost_col_idx)}{grand_total_row_idx+1}"
@@ -1942,6 +1970,9 @@ def convert_shopify_to_excel_with_date_columns_fixed(df):
         worksheet.freeze_panes(2, len(base_columns))  # Freeze header and base columns
     
     return output.getvalue()
+
+
+
 
 def convert_final_campaign_to_excel(df, original_campaign_df=None):
     """Original Campaign Excel conversion function (fallback)"""
@@ -2182,8 +2213,7 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
 
     return output.getvalue()
 
-
-def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None):
+def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None, selected_days=None):
     """Convert Campaign data to Excel with day-wise lookups integrated and unmatched campaigns sheet"""
     if df.empty:
         return None
@@ -2230,7 +2260,12 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
         
         # Get unique dates and sort them
         unique_dates = sorted([str(d) for d in df['Date'].unique() if pd.notna(d) and str(d).strip() != ''])
-        
+        if selected_days is None:
+            if len(unique_dates) > 0:
+                n_days = len(unique_dates)
+                selected_days = n_days // 2 if n_days % 2 == 0 else (n_days + 1) // 2
+            else:
+                selected_days = 1
         # Define base columns - CHANGED: Cost Per Purchase to CPP, Amount Spent (Zero Net Profit %) to BE
         base_columns = ["Product Name", "Campaign Name", "Total Amount Spent (USD)", "Total Purchases", "CPP", "BE"]
         
@@ -2327,6 +2362,44 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
         row = grand_total_row_idx + 1
         product_total_rows = []
 
+        # NEW: Pre-calculate product-level delivery rates AND average prices for Total columns
+        product_total_delivery_rates = {}
+        product_total_avg_prices = {}
+        
+        for product, product_df in df.groupby("Product"):
+            # Calculate weighted average delivery rate for this product across all dates
+            total_purchases_delivery = 0
+            weighted_delivery_rate_sum = 0
+            
+            # Calculate weighted average price for this product across all dates
+            total_purchases_price = 0
+            weighted_avg_price_sum = 0
+            
+            for date in unique_dates:
+                date_delivery_rate = product_date_delivery_rates.get(product, {}).get(date, 0)
+                date_avg_price = product_date_avg_prices.get(product, {}).get(date, 0)
+                date_purchases = product_df[product_df['Date'].astype(str) == date]['Purchases'].sum() if 'Purchases' in product_df.columns else 0
+                
+                # For delivery rate calculation
+                total_purchases_delivery += date_purchases
+                weighted_delivery_rate_sum += date_delivery_rate * date_purchases
+                
+                # For average price calculation
+                total_purchases_price += date_purchases
+                weighted_avg_price_sum += date_avg_price * date_purchases
+            
+            # Calculate weighted average delivery rate for this product
+            if total_purchases_delivery > 0:
+                product_total_delivery_rates[product] = weighted_delivery_rate_sum / total_purchases_delivery
+            else:
+                product_total_delivery_rates[product] = 0
+            
+            # Calculate weighted average price for this product
+            if total_purchases_price > 0:
+                product_total_avg_prices[product] = weighted_avg_price_sum / total_purchases_price
+            else:
+                product_total_avg_prices[product] = 0
+
         # Group by product and restructure data - SORT BY CPP WITHIN EACH PRODUCT
         for product, product_df in df.groupby("Product"):
             # Check if this product has Shopify data (day-wise lookups)
@@ -2363,9 +2436,11 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                 total_amount_spent_usd = campaign_group.get("Amount Spent (USD)", 0).sum() if "Amount Spent (USD)" in campaign_group.columns else 0
                 total_purchases = campaign_group.get("Purchases", 0).sum() if "Purchases" in campaign_group.columns else 0
                 
-                # Calculate CPP (Cost Per Purchase)
+                # MODIFIED CPP CALCULATION: Use 1 for purchases if amount > 0 and purchases = 0
                 cpp = 0
-                if total_purchases > 0:
+                if total_amount_spent_usd > 0 and total_purchases == 0:
+                    cpp = total_amount_spent_usd / 1  # Use 1 for formula purposes
+                elif total_purchases > 0:
                     cpp = total_amount_spent_usd / total_purchases
                 
                 campaign_groups.append((cpp, campaign_name, campaign_group))
@@ -2482,10 +2557,10 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                     
                     # FORMULAS for calculated fields
                     
-                    # Cost Per Purchase (USD) = Amount Spent (USD) / Purchases
+                    # MODIFIED Cost Per Purchase (USD) formula: Use MAX(Purchases, 1) when Amount > 0
                     worksheet.write_formula(
                         campaign_row_idx, cost_per_purchase_col_idx,
-                         f"=ROUND(IF({purchases_ref}=0,0,{amount_spent_ref}/{purchases_ref}),2)",
+                        f"=ROUND(IF({amount_spent_ref}>0,{amount_spent_ref}/MAX({purchases_ref},1),IF({purchases_ref}=0,0,{amount_spent_ref}/{purchases_ref})),2)",
                         campaign_format
                     )
                     
@@ -2532,44 +2607,31 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                         campaign_format
                     )
                     
-                    # Net Profit (%) = Net Profit / Net Revenue * 100
+                    # MODIFIED Net Profit (%) = Net Profit / (Avg Price * Delivery Rate * Purchases) * 100
+                    # Use MAX(Purchases, 1) when Amount Spent > 0
+                    rate_term_for_profit = f"IF(ISNUMBER({delivery_rate_ref}),IF({delivery_rate_ref}>1,{delivery_rate_ref}/100,{delivery_rate_ref}),0)"
+                    denominator_formula = f"({avg_price_ref}*{rate_term_for_profit}*IF({amount_spent_ref}>0,MAX({purchases_ref},1),{purchases_ref}))"
                     worksheet.write_formula(
                         campaign_row_idx, net_profit_percent_col_idx,
-                        f"=ROUND(IF({net_revenue_ref}=0,0,{net_profit_ref}/{net_revenue_ref}*100),2)",
+                        f"=ROUND(IF({denominator_formula}=0,0,{net_profit_ref}/{denominator_formula}*100),2)",
                         campaign_format
                     )
                 
-                # TOTAL COLUMNS CALCULATIONS FOR CAMPAIGN (similar to existing logic)
+                # TOTAL COLUMNS CALCULATIONS FOR CAMPAIGN (FIXED: Use product-level delivery rate AND average price)
                 for metric in date_metrics:
                     total_col_idx = all_columns.index(f"Total_{metric}")
                     
                     if metric == "Avg Price":
-                        # WEIGHTED AVERAGE: (Price1*Purchases1 + Price2*Purchases2 + ...) / TotalPurchases
-                        total_purchases_col_idx = all_columns.index("Total_Purchases")
-                        total_purchases_ref = f"{xl_col_to_name(total_purchases_col_idx)}{excel_row}"
-                        
-                        if len(unique_dates) > 1:
-                            price_terms = []
-                            for date in unique_dates:
-                                price_col_idx = all_columns.index(f"{date}_Avg Price")
-                                purchases_col_idx = all_columns.index(f"{date}_Purchases")
-                                price_terms.append(f"{xl_col_to_name(price_col_idx)}{excel_row}*{xl_col_to_name(purchases_col_idx)}{excel_row}")
-                            
-                            sumproduct_formula = "+".join(price_terms)
-                            worksheet.write_formula(
-                                campaign_row_idx, total_col_idx,
-                                f"=ROUND(IF({total_purchases_ref}=0,0,({sumproduct_formula})/{total_purchases_ref}),2)",
-                                campaign_format
-                            )
-                        else:
-                            single_date_col = all_columns.index(f"{unique_dates[0]}_{metric}")
-                            worksheet.write_formula(
-                                campaign_row_idx, total_col_idx,
-                                f"=ROUND({xl_col_to_name(single_date_col)}{excel_row},2)",
-                                campaign_format
-                            )
+                        # FIXED: Use the pre-calculated product-level average price for ALL campaigns of this product
+                        product_avg_price = product_total_avg_prices.get(product, 0)
+                        safe_write(worksheet, campaign_row_idx, total_col_idx, round(float(product_avg_price), 2), campaign_format)
                     
-                    elif metric in ["Delivery Rate", "Product Cost Input"]:
+                    elif metric == "Delivery Rate":
+                        # FIXED: Use the pre-calculated product-level delivery rate for ALL campaigns of this product
+                        product_delivery_rate = product_total_delivery_rates.get(product, 0)
+                        safe_write(worksheet, campaign_row_idx, total_col_idx, round(float(product_delivery_rate), 2), campaign_format)
+                    
+                    elif metric == "Product Cost Input":
                         # WEIGHTED AVERAGE
                         total_purchases_col_idx = all_columns.index("Total_Purchases")
                         total_purchases_ref = f"{xl_col_to_name(total_purchases_col_idx)}{excel_row}"
@@ -2596,7 +2658,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                             )
                     
                     elif metric == "Cost Per Purchase (USD)":
-                        # CALCULATED: Total Amount Spent / Total Purchases
+                        # MODIFIED CALCULATED: Total Amount Spent / MAX(Total Purchases, 1) when Amount > 0
                         total_amount_spent_col_idx = all_columns.index("Total_Amount Spent (USD)")
                         total_purchases_col_idx = all_columns.index("Total_Purchases")
                         total_amount_spent_ref = f"{xl_col_to_name(total_amount_spent_col_idx)}{excel_row}"
@@ -2604,20 +2666,29 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                         
                         worksheet.write_formula(
                             campaign_row_idx, total_col_idx,
-                            f"=ROUND(IF({total_purchases_ref}=0,0,{total_amount_spent_ref}/{total_purchases_ref}),2)",
+                            f"=ROUND(IF({total_amount_spent_ref}>0,{total_amount_spent_ref}/MAX({total_purchases_ref},1),IF({total_purchases_ref}=0,0,{total_amount_spent_ref}/{total_purchases_ref})),2)",
                             campaign_format
                         )
                     
                     elif metric == "Net Profit (%)":
-                        # CALCULATED: Total Net Profit / Total Net Revenue * 100
+                        # MODIFIED CALCULATED: Net Profit / (Avg Price * Delivery Rate * Purchases) * 100
+                        # Use MAX(Purchases, 1) when Amount Spent > 0
                         total_net_profit_col_idx = all_columns.index("Total_Net Profit")
-                        total_net_revenue_col_idx = all_columns.index("Total_Net Revenue")
+                        total_avg_price_col_idx = all_columns.index("Total_Avg Price")
+                        total_delivery_rate_col_idx = all_columns.index("Total_Delivery Rate")
+                        total_amount_spent_col_idx = all_columns.index("Total_Amount Spent (USD)")
                         total_net_profit_ref = f"{xl_col_to_name(total_net_profit_col_idx)}{excel_row}"
-                        total_net_revenue_ref = f"{xl_col_to_name(total_net_revenue_col_idx)}{excel_row}"
+                        total_avg_price_ref = f"{xl_col_to_name(total_avg_price_col_idx)}{excel_row}"
+                        total_delivery_rate_ref = f"{xl_col_to_name(total_delivery_rate_col_idx)}{excel_row}"
+                        total_amount_spent_ref = f"{xl_col_to_name(total_amount_spent_col_idx)}{excel_row}"
+                        total_purchases_ref = f"{xl_col_to_name(total_purchases_col_idx)}{excel_row}"
+                        
+                        rate_term_total = f"IF(ISNUMBER({total_delivery_rate_ref}),IF({total_delivery_rate_ref}>1,{total_delivery_rate_ref}/100,{total_delivery_rate_ref}),0)"
+                        denominator_formula_total = f"({total_avg_price_ref}*{rate_term_total}*IF({total_amount_spent_ref}>0,MAX({total_purchases_ref},1),{total_purchases_ref}))"
                         
                         worksheet.write_formula(
                             campaign_row_idx, total_col_idx,
-                            f"=ROUND(IF({total_net_revenue_ref}=0,0,{total_net_profit_ref}/{total_net_revenue_ref}*100),2)",
+                            f"=ROUND(IF({denominator_formula_total}=0,0,{total_net_profit_ref}/{denominator_formula_total}*100),2)",
                             campaign_format
                         )
                     
@@ -2706,7 +2777,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                 total_shipping_cost_col_idx = all_columns.index("Total_Total Shipping Cost")
                 total_operational_cost_col_idx = all_columns.index("Total_Total Operational Cost")
                 total_product_cost_col_idx = all_columns.index("Total_Total Product Cost")
-                total_delivered_orders_col_idx = all_columns.index("Total_Delivered Orders")  # CHANGED: Use Delivered Orders instead of Purchases
+                total_delivered_orders_col_idx = all_columns.index("Total_Purchases")  # CHANGED: Use Delivered Orders instead of Purchases
                 
                 total_net_revenue_ref = f"{xl_col_to_name(total_net_revenue_col_idx)}{product_total_row_idx+1}"
                 total_shipping_cost_ref = f"{xl_col_to_name(total_shipping_cost_col_idx)}{product_total_row_idx+1}"
@@ -2737,7 +2808,15 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                     for metric in date_metrics:
                         col_idx = all_columns.index(f"{date}_{metric}")
                         
-                        if metric in ["Avg Price", "Delivery Rate", "Product Cost Input"]:
+                        if metric == "Avg Price":
+                            # FIXED: Use the same product-level average price for product total row
+                            date_avg_price = product_date_avg_prices.get(product, {}).get(date, 0)
+                            safe_write(worksheet, product_total_row_idx, col_idx, round(float(date_avg_price), 2), product_total_format)
+                        elif metric == "Delivery Rate":
+                            # FIXED: Use the same product-level delivery rate for product total row
+                            date_delivery_rate = product_date_delivery_rates.get(product, {}).get(date, 0)
+                            safe_write(worksheet, product_total_row_idx, col_idx, round(float(date_delivery_rate), 2), product_total_format)
+                        elif metric == "Product Cost Input":
                             # Weighted average based on purchases for this date using RANGES
                             date_purchases_col_idx = all_columns.index(f"{date}_Purchases")
                             
@@ -2754,17 +2833,23 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                             if metric == "Cost Per Purchase (USD)":
                                 amount_spent_idx = all_columns.index(f"{date}_Amount Spent (USD)")
                                 purchases_idx = all_columns.index(f"{date}_Purchases")
+                                # MODIFIED CPP formula for product totals
                                 worksheet.write_formula(
                                     product_total_row_idx, col_idx,
-                                    f"=ROUND(IF({xl_col_to_name(purchases_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(amount_spent_idx)}{product_total_row_idx+1}/{xl_col_to_name(purchases_idx)}{product_total_row_idx+1}),2)",
+                                    f"=ROUND(IF({xl_col_to_name(amount_spent_idx)}{product_total_row_idx+1}>0,{xl_col_to_name(amount_spent_idx)}{product_total_row_idx+1}/MAX({xl_col_to_name(purchases_idx)}{product_total_row_idx+1},1),IF({xl_col_to_name(purchases_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(amount_spent_idx)}{product_total_row_idx+1}/{xl_col_to_name(purchases_idx)}{product_total_row_idx+1})),2)",
                                     product_total_format
                                 )
                             else: # Net Profit (%)
                                 net_profit_idx = all_columns.index(f"{date}_Net Profit")
-                                net_revenue_idx = all_columns.index(f"{date}_Net Revenue")
+                                avg_price_idx = all_columns.index(f"{date}_Avg Price")
+                                delivery_rate_idx = all_columns.index(f"{date}_Delivery Rate")
+                                amount_spent_idx = all_columns.index(f"{date}_Amount Spent (USD)")
+                                # MODIFIED Net Profit (%) formula for product totals
+                                rate_term_product = f"IF(ISNUMBER({xl_col_to_name(delivery_rate_idx)}{product_total_row_idx+1}),IF({xl_col_to_name(delivery_rate_idx)}{product_total_row_idx+1}>1,{xl_col_to_name(delivery_rate_idx)}{product_total_row_idx+1}/100,{xl_col_to_name(delivery_rate_idx)}{product_total_row_idx+1}),0)"
+                                denominator_formula_product = f"({xl_col_to_name(avg_price_idx)}{product_total_row_idx+1}*{rate_term_product}*IF({xl_col_to_name(amount_spent_idx)}{product_total_row_idx+1}>0,MAX({xl_col_to_name(purchases_idx)}{product_total_row_idx+1},1),{xl_col_to_name(purchases_idx)}{product_total_row_idx+1}))"
                                 worksheet.write_formula(
                                     product_total_row_idx, col_idx,
-                                    f"=ROUND(IF({xl_col_to_name(net_revenue_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(net_profit_idx)}{product_total_row_idx+1}/{xl_col_to_name(net_revenue_idx)}{product_total_row_idx+1}*100),2)",
+                                    f"=ROUND(IF({denominator_formula_product}=0,0,{xl_col_to_name(net_profit_idx)}{product_total_row_idx+1}/{denominator_formula_product}*100),2)",
                                     product_total_format
                                 )
                         else:
@@ -2776,11 +2861,19 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                                 product_total_format
                             )
                 
-                # Calculate product totals for Total columns using RANGES
+                # Calculate product totals for Total columns using RANGES (FIXED: Use product-level delivery rate AND average price)
                 for metric in date_metrics:
                     col_idx = all_columns.index(f"Total_{metric}")
                     
-                    if metric in ["Avg Price", "Delivery Rate", "Product Cost Input"]:
+                    if metric == "Avg Price":
+                        # FIXED: Use the pre-calculated product-level average price for product total
+                        product_avg_price = product_total_avg_prices.get(product, 0)
+                        safe_write(worksheet, product_total_row_idx, col_idx, round(float(product_avg_price), 2), product_total_format)
+                    elif metric == "Delivery Rate":
+                        # FIXED: Use the pre-calculated product-level delivery rate for product total
+                        product_delivery_rate = product_total_delivery_rates.get(product, 0)
+                        safe_write(worksheet, product_total_row_idx, col_idx, round(float(product_delivery_rate), 2), product_total_format)
+                    elif metric == "Product Cost Input":
                         # Weighted average based on total purchases using RANGES
                         total_purchases_col_idx = all_columns.index("Total_Purchases")
                         
@@ -2797,17 +2890,23 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                         if metric == "Cost Per Purchase (USD)":
                             total_amount_spent_idx = all_columns.index("Total_Amount Spent (USD)")
                             total_purchases_idx = all_columns.index("Total_Purchases")
+                            # MODIFIED CPP formula for product total in Total columns
                             worksheet.write_formula(
                                 product_total_row_idx, col_idx,
-                                f"=ROUND(IF({xl_col_to_name(total_purchases_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(total_amount_spent_idx)}{product_total_row_idx+1}/{xl_col_to_name(total_purchases_idx)}{product_total_row_idx+1}),2)",
+                                f"=ROUND(IF({xl_col_to_name(total_amount_spent_idx)}{product_total_row_idx+1}>0,{xl_col_to_name(total_amount_spent_idx)}{product_total_row_idx+1}/MAX({xl_col_to_name(total_purchases_idx)}{product_total_row_idx+1},1),IF({xl_col_to_name(total_purchases_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(total_amount_spent_idx)}{product_total_row_idx+1}/{xl_col_to_name(total_purchases_idx)}{product_total_row_idx+1})),2)",
                                 product_total_format
                             )
                         else: # Net Profit (%)
                             total_net_profit_idx = all_columns.index("Total_Net Profit")
-                            total_net_revenue_idx = all_columns.index("Total_Net Revenue")
+                            total_avg_price_idx = all_columns.index("Total_Avg Price")
+                            total_delivery_rate_idx = all_columns.index("Total_Delivery Rate")
+                            total_amount_spent_idx = all_columns.index("Total_Amount Spent (USD)")
+                            # MODIFIED Net Profit (%) formula for product total in Total columns
+                            rate_term_product_total = f"IF(ISNUMBER({xl_col_to_name(total_delivery_rate_idx)}{product_total_row_idx+1}),IF({xl_col_to_name(total_delivery_rate_idx)}{product_total_row_idx+1}>1,{xl_col_to_name(total_delivery_rate_idx)}{product_total_row_idx+1}/100,{xl_col_to_name(total_delivery_rate_idx)}{product_total_row_idx+1}),0)"
+                            denominator_formula_product_total = f"({xl_col_to_name(total_avg_price_idx)}{product_total_row_idx+1}*{rate_term_product_total}*IF({xl_col_to_name(total_amount_spent_idx)}{product_total_row_idx+1}>0,MAX({xl_col_to_name(total_purchases_idx)}{product_total_row_idx+1},1),{xl_col_to_name(total_purchases_idx)}{product_total_row_idx+1}))"
                             worksheet.write_formula(
                                 product_total_row_idx, col_idx,
-                                f"=ROUND(IF({xl_col_to_name(total_net_revenue_idx)}{product_total_row_idx+1}=0,0,{xl_col_to_name(total_net_profit_idx)}{product_total_row_idx+1}/{xl_col_to_name(total_net_revenue_idx)}{product_total_row_idx+1}*100),2)",
+                                f"=ROUND(IF({denominator_formula_product_total}=0,0,{xl_col_to_name(total_net_profit_idx)}{product_total_row_idx+1}/{denominator_formula_product_total}*100),2)",
                                 product_total_format
                             )
                     else:
@@ -2819,7 +2918,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                             product_total_format
                         )
 
-        # Calculate grand totals using INDIVIDUAL PRODUCT TOTAL ROWS ONLY
+        # Calculate grand totals using INDIVIDUAL PRODUCT TOTAL ROWS ONLY (FIXED: Use weighted average for delivery rate AND average price)
         if product_total_rows:
             # Base columns for grand total
             total_amount_spent_col_idx = all_columns.index("Total_Amount Spent (USD)")
@@ -2850,7 +2949,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
             total_shipping_cost_col_idx = all_columns.index("Total_Total Shipping Cost")
             total_operational_cost_col_idx = all_columns.index("Total_Total Operational Cost")
             total_product_cost_col_idx = all_columns.index("Total_Total Product Cost")
-            total_delivered_orders_col_idx = all_columns.index("Total_Delivered Orders")  # CHANGED: Use Delivered Orders instead of Purchases
+            total_delivered_orders_col_idx = all_columns.index("Total_Purchases")  # CHANGED: Use Delivered Orders instead of Purchases
             
             total_net_revenue_ref = f"{xl_col_to_name(total_net_revenue_col_idx)}{grand_total_row_idx+1}"
             total_shipping_cost_ref = f"{xl_col_to_name(total_shipping_cost_col_idx)}{grand_total_row_idx+1}"
@@ -2874,7 +2973,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
             else:
                 safe_write(worksheet, grand_total_row_idx, all_columns.index("Remark"), "", grand_total_format)
             
-            # Date-specific and total columns for grand total using INDIVIDUAL PRODUCT ROWS
+            # Date-specific and total columns for grand total using INDIVIDUAL PRODUCT ROWS (FIXED: Weighted average for delivery rate AND average price)
             for date in unique_dates:
                 for metric in date_metrics:
                     col_idx = all_columns.index(f"{date}_{metric}")
@@ -2908,17 +3007,23 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                         if metric == "Cost Per Purchase (USD)":
                             amount_spent_idx = all_columns.index(f"{date}_Amount Spent (USD)")
                             purchases_idx = all_columns.index(f"{date}_Purchases")
+                            # MODIFIED CPP formula for grand total
                             worksheet.write_formula(
                                 grand_total_row_idx, col_idx,
-                                f"=ROUND(IF({xl_col_to_name(purchases_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(amount_spent_idx)}{grand_total_row_idx+1}/{xl_col_to_name(purchases_idx)}{grand_total_row_idx+1}),2)",
+                                f"=ROUND(IF({xl_col_to_name(amount_spent_idx)}{grand_total_row_idx+1}>0,{xl_col_to_name(amount_spent_idx)}{grand_total_row_idx+1}/MAX({xl_col_to_name(purchases_idx)}{grand_total_row_idx+1},1),IF({xl_col_to_name(purchases_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(amount_spent_idx)}{grand_total_row_idx+1}/{xl_col_to_name(purchases_idx)}{grand_total_row_idx+1})),2)",
                                 grand_total_format
                             )
                         else: # Net Profit (%)
                             net_profit_idx = all_columns.index(f"{date}_Net Profit")
-                            net_revenue_idx = all_columns.index(f"{date}_Net Revenue")
+                            avg_price_idx = all_columns.index(f"{date}_Avg Price")
+                            delivery_rate_idx = all_columns.index(f"{date}_Delivery Rate")
+                            amount_spent_idx = all_columns.index(f"{date}_Amount Spent (USD)")
+                            # MODIFIED CPP formula for grand total
+                            rate_term_grand = f"IF(ISNUMBER({xl_col_to_name(delivery_rate_idx)}{grand_total_row_idx+1}),IF({xl_col_to_name(delivery_rate_idx)}{grand_total_row_idx+1}>1,{xl_col_to_name(delivery_rate_idx)}{grand_total_row_idx+1}/100,{xl_col_to_name(delivery_rate_idx)}{grand_total_row_idx+1}),0)"
+                            denominator_formula_grand = f"({xl_col_to_name(avg_price_idx)}{grand_total_row_idx+1}*{rate_term_grand}*IF({xl_col_to_name(amount_spent_idx)}{grand_total_row_idx+1}>0,MAX({xl_col_to_name(purchases_idx)}{grand_total_row_idx+1},1),{xl_col_to_name(purchases_idx)}{grand_total_row_idx+1}))"
                             worksheet.write_formula(
                                 grand_total_row_idx, col_idx,
-                                f"=ROUND(IF({xl_col_to_name(net_revenue_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(net_profit_idx)}{grand_total_row_idx+1}/{xl_col_to_name(net_revenue_idx)}{grand_total_row_idx+1}*100),2)",
+                                f"=ROUND(IF({denominator_formula_grand}=0,0,{xl_col_to_name(net_profit_idx)}{grand_total_row_idx+1}/{denominator_formula_grand}*100),2)",
                                 grand_total_format
                             )
                     else:
@@ -2935,7 +3040,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                             grand_total_format
                         )
             
-            # Total columns for grand total using INDIVIDUAL PRODUCT TOTAL ROWS
+            # Total columns for grand total using INDIVIDUAL PRODUCT TOTAL ROWS (FIXED: Weighted average for delivery rate AND average price)
             total_purchases_col_idx = all_columns.index("Total_Purchases")
             
             for metric in date_metrics:
@@ -2968,17 +3073,24 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
                     if metric == "Cost Per Purchase (USD)":
                         total_amount_spent_idx = all_columns.index("Total_Amount Spent (USD)")
                         total_purchases_idx = all_columns.index("Total_Purchases")
+                        # MODIFIED CPP formula for grand total in Total columns
                         worksheet.write_formula(
                             grand_total_row_idx, col_idx,
-                            f"=ROUND(IF({xl_col_to_name(total_purchases_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(total_amount_spent_idx)}{grand_total_row_idx+1}/{xl_col_to_name(total_purchases_idx)}{grand_total_row_idx+1}),2)",
+                            f"=ROUND(IF({xl_col_to_name(total_amount_spent_idx)}{grand_total_row_idx+1}>0,{xl_col_to_name(total_amount_spent_idx)}{grand_total_row_idx+1}/MAX({xl_col_to_name(total_purchases_idx)}{grand_total_row_idx+1},1),IF({xl_col_to_name(total_purchases_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(total_amount_spent_idx)}{grand_total_row_idx+1}/{xl_col_to_name(total_purchases_idx)}{grand_total_row_idx+1})),2)",
                             grand_total_format
                         )
                     else: # Net Profit (%)
                         total_net_profit_idx = all_columns.index("Total_Net Profit")
-                        total_net_revenue_idx = all_columns.index("Total_Net Revenue")
+                        total_avg_price_idx = all_columns.index("Total_Avg Price")
+                        total_delivery_rate_idx = all_columns.index("Total_Delivery Rate")
+                        total_amount_spent_idx = all_columns.index("Total_Amount Spent (USD)")
+                        total_purchases_idx = all_columns.index("Total_Purchases")
+                        # MODIFIED Net Profit (%) formula for grand total in Total columns
+                        rate_term_grand_total = f"IF(ISNUMBER({xl_col_to_name(total_delivery_rate_idx)}{grand_total_row_idx+1}),IF({xl_col_to_name(total_delivery_rate_idx)}{grand_total_row_idx+1}>1,{xl_col_to_name(total_delivery_rate_idx)}{grand_total_row_idx+1}/100,{xl_col_to_name(total_delivery_rate_idx)}{grand_total_row_idx+1}),0)"
+                        denominator_formula_grand_total = f"({xl_col_to_name(total_avg_price_idx)}{grand_total_row_idx+1}*{rate_term_grand_total}*IF({xl_col_to_name(total_amount_spent_idx)}{grand_total_row_idx+1}>0,MAX({xl_col_to_name(total_purchases_idx)}{grand_total_row_idx+1},1),{xl_col_to_name(total_purchases_idx)}{grand_total_row_idx+1}))"
                         worksheet.write_formula(
                             grand_total_row_idx, col_idx,
-                            f"=ROUND(IF({xl_col_to_name(total_net_revenue_idx)}{grand_total_row_idx+1}=0,0,{xl_col_to_name(total_net_profit_idx)}{grand_total_row_idx+1}/{xl_col_to_name(total_net_revenue_idx)}{grand_total_row_idx+1}*100),2)",
+                            f"=ROUND(IF({denominator_formula_grand_total}=0,0,{xl_col_to_name(total_net_profit_idx)}{grand_total_row_idx+1}/{denominator_formula_grand_total}*100),2)",
                             grand_total_format
                         )
                 else:
@@ -3040,8 +3152,11 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
             current_row += 1
             
             for campaign in unmatched_campaigns:
+                # MODIFIED CPP calculation for unmatched campaigns sheet
                 cost_per_purchase_usd = 0
-                if campaign['Purchases'] > 0:
+                if campaign['Amount Spent (USD)'] > 0 and campaign['Purchases'] == 0:
+                    cost_per_purchase_usd = round(campaign['Amount Spent (USD)'] / 1, 2)  # Use 1 when no purchases but has spending
+                elif campaign['Purchases'] > 0:
                     cost_per_purchase_usd = round(campaign['Amount Spent (USD)'] / campaign['Purchases'], 2)
                 
                 dates_str = ", ".join(campaign['Dates']) if campaign['Dates'] else "No dates"
@@ -3064,8 +3179,11 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
             current_row += 1
             
             for campaign in matched_campaigns[:10]:  # Show only first 10 to save space
+                # MODIFIED CPP calculation for matched campaigns sheet
                 cost_per_purchase_usd = 0
-                if campaign['Purchases'] > 0:
+                if campaign['Amount Spent (USD)'] > 0 and campaign['Purchases'] == 0:
+                    cost_per_purchase_usd = round(campaign['Amount Spent (USD)'] / 1, 2)  # Use 1 when no purchases but has spending
+                elif campaign['Purchases'] > 0:
                     cost_per_purchase_usd = round(campaign['Amount Spent (USD)'] / campaign['Purchases'], 2)
                 
                 dates_str = ", ".join(campaign['Dates']) if campaign['Dates'] else "No dates"
@@ -3095,7 +3213,155 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None)
         unmatched_sheet.set_column(7, 7, 25)  # Dates Covered
         unmatched_sheet.set_column(8, 8, 40)  # Reason
         
+        # Add this code to the main campaign function (convert_final_campaign_to_excel_with_date_columns_fixed)
+# Place this code after the "Unmatched Campaigns" sheet creation and before the final return statement
+
+# ==== NEW SHEET: Negative Net Profit Campaigns ====
+        negative_profit_sheet = workbook.add_worksheet("Negative Net Profit Campaigns")
+
+# Formats for negative net profit sheet
+        negative_profit_header_format = workbook.add_format({
+               "bold": True, "align": "center", "valign": "vcenter",
+               "fg_color": "#FF6B6B", "font_name": "Calibri", "font_size": 11
+        })
+        negative_profit_data_format = workbook.add_format({
+               "align": "left", "valign": "vcenter",
+               "fg_color": "#FFE6E6", "font_name": "Calibri", "font_size": 11,
+               "num_format": "#,##0.00"
+        })
+
+# Headers for negative net profit sheet
+        negative_headers = ["Product", "Campaign Name", "Total Dates", "Days Checked", 
+                   "Days with Negative Net Profit %", "Average Negative Net Profit %", "Negative Net Profit Dates", "Reason"]
+
+        for col_num, header in enumerate(negative_headers):
+                safe_write(negative_profit_sheet, 0, col_num, header, negative_profit_header_format)
+
+# Calculate selected_days threshold (default: len(unique_dates) // 2, minimum 1)
+        if selected_days is None:
+            selected_days = max(1, len(unique_dates) // 2)
+
+# Analyze campaigns for negative net profit percentage
+        negative_profit_campaigns = []
+        current_row = 1
+
+# Group by product and campaign to analyze net profit percentages
+        for product, product_df in df.groupby("Product"):
+               for campaign_name, campaign_group in product_df.groupby("Campaign Name"):
+        # Get dates for this campaign and sort them
+                   campaign_dates = sorted([str(d) for d in campaign_group['Date'].unique() if pd.notna(d) and str(d).strip() != ''])
+        
+                   if len(campaign_dates) < selected_days:  # Skip campaigns with fewer dates than selected
+                        continue
+        
+        # Calculate net profit percentages for ALL dates
+                   date_net_profit_percentages = []
+                   for date in campaign_dates:
+                       date_data = campaign_group[campaign_group['Date'].astype(str) == date]
+                       if not date_data.empty:
+                             row_data = date_data.iloc[0]
+                
+                # Get data for net profit percentage calculation
+                             amount_spent = row_data.get("Amount Spent (USD)", 0) or 0
+                             purchases = row_data.get("Purchases", 0) or 0
+                
+                # Get day-wise lookup data
+                             date_avg_price = product_date_avg_prices.get(product, {}).get(date, 0)
+                             date_delivery_rate = product_date_delivery_rates.get(product, {}).get(date, 0)
+                             date_product_cost = product_date_cost_inputs.get(product, {}).get(date, 0)
+                
+                # Calculate net profit percentage using the same logic as in the main sheet
+                             if date_avg_price > 0 and (purchases > 0 or (purchases == 0 and amount_spent > 0)):
+                    # Handle zero purchases case - use 1 when amount spent > 0 but purchases = 0
+                                calc_purchases = 1 if (purchases == 0 and amount_spent > 0) else purchases
+                    
+                    # Delivery rate conversion
+                                delivery_rate = date_delivery_rate / 100 if date_delivery_rate > 1 else date_delivery_rate
+                    
+                    # Calculate components for net profit percentage
+                                delivered_orders = calc_purchases * delivery_rate
+                                net_revenue = delivered_orders * date_avg_price
+                                total_product_cost = delivered_orders * date_product_cost
+                                total_shipping_cost = calc_purchases * shipping_rate  # Use shipping_rate from global scope
+                                total_operational_cost = calc_purchases * operational_rate  # Use operational_rate from global scope
+                                net_profit = net_revenue - (amount_spent * 100) - total_shipping_cost - total_operational_cost - total_product_cost
+                    
+                    # Net Profit Percentage = Net Profit / (Avg Price * Delivery Rate * Purchases) * 100
+                                denominator = date_avg_price * delivery_rate * calc_purchases
+                                net_profit_percentage = (net_profit / denominator * 100) if denominator > 0 else 0
+                    
+                                date_net_profit_percentages.append({
+                                   'date': date,
+                                   'net_profit_percentage': net_profit_percentage,
+                                   'amount_spent': amount_spent,
+                                   'purchases': purchases
+                                })
+        
+        # Count negative net profit percentages and check if we have at least 'selected_days' negative values
+                   negative_profit_data = [data for data in date_net_profit_percentages if data['net_profit_percentage'] < 0]
+        
+                   if len(negative_profit_data) >= selected_days:
+            # This campaign has the required number of negative net profit percentages
+                      avg_negative_profit = sum(data['net_profit_percentage'] for data in negative_profit_data) / len(negative_profit_data)
+                      negative_dates = [data['date'] for data in negative_profit_data]
+            
+                      negative_campaign = {
+                         'Product': str(product),
+                          'Campaign Name': str(campaign_name),
+                          'Total Dates': len(campaign_dates),
+                          'Days Checked': selected_days,
+                           'Days with Negative Net Profit %': len(negative_profit_data),
+                           'Average Negative Net Profit %': round(avg_negative_profit, 2),
+                          'Negative Net Profit Dates': ", ".join(negative_dates[:10]) + ("..." if len(negative_dates) > 10 else ""),
+                          'Reason': f"Has {len(negative_profit_data)} negative net profit % days out of {len(campaign_dates)} total days (threshold: {selected_days})"
+                       }
+            
+                      negative_profit_campaigns.append(negative_campaign)
+
+# Write negative net profit campaigns to sheet
+        if negative_profit_campaigns:
+    # Sort by number of negative days (worst first)
+           negative_profit_campaigns.sort(key=lambda x: x['Days with Negative Net Profit %'], reverse=True)
+    
+           for campaign in negative_profit_campaigns:
+              safe_write(negative_profit_sheet, current_row, 0, campaign['Product'], negative_profit_data_format)
+              safe_write(negative_profit_sheet, current_row, 1, campaign['Campaign Name'], negative_profit_data_format)
+              safe_write(negative_profit_sheet, current_row, 2, campaign['Total Dates'], negative_profit_data_format)
+              safe_write(negative_profit_sheet, current_row, 3, campaign['Days Checked'], negative_profit_data_format)
+              safe_write(negative_profit_sheet, current_row, 4, campaign['Days with Negative Net Profit %'], negative_profit_data_format)
+              safe_write(negative_profit_sheet, current_row, 5, campaign['Average Negative Net Profit %'], negative_profit_data_format)
+              safe_write(negative_profit_sheet, current_row, 6, campaign['Negative Net Profit Dates'], negative_profit_data_format)
+              safe_write(negative_profit_sheet, current_row, 7, campaign['Reason'], negative_profit_data_format)
+              current_row += 1
+        else:
+    # No negative campaigns found
+              safe_write(negative_profit_sheet, current_row, 0, f"No campaigns found with {selected_days} or more negative net profit % days", negative_profit_data_format)
+
+# Add summary
+        safe_write(negative_profit_sheet, current_row + 2, 0, "SUMMARY", negative_profit_header_format)
+
+# Count total campaigns correctly
+        total_campaigns = 0
+        for product, product_df in df.groupby("Product"):
+              total_campaigns += len(product_df.groupby("Campaign Name"))
+
+        safe_write(negative_profit_sheet, current_row + 3, 0, f"Total campaigns analyzed: {total_campaigns}", negative_profit_data_format)
+        safe_write(negative_profit_sheet, current_row + 4, 0, f"Campaigns with {selected_days}+ negative net profit % days: {len(negative_profit_campaigns)}", negative_profit_data_format)
+        safe_write(negative_profit_sheet, current_row + 5, 0, f"Days threshold used: {selected_days} out of {len(unique_dates)} total unique dates", negative_profit_data_format)
+        safe_write(negative_profit_sheet, current_row + 6, 0, f"Date range analyzed: {min(unique_dates)} to {max(unique_dates)}" if unique_dates else "No dates found", negative_profit_data_format)
+
+# Set column widths for negative net profit sheet
+        negative_profit_sheet.set_column(0, 0, 20)  # Product
+        negative_profit_sheet.set_column(1, 1, 35)  # Campaign Name
+        negative_profit_sheet.set_column(2, 2, 15)  # Total Dates
+        negative_profit_sheet.set_column(3, 3, 15)  # Days Checked
+        negative_profit_sheet.set_column(4, 4, 25)  # Days with Negative Net Profit %
+        negative_profit_sheet.set_column(5, 5, 25)  # Average Negative Net Profit %
+        negative_profit_sheet.set_column(6, 6, 30)  # Negative Net Profit Dates
+        negative_profit_sheet.set_column(7, 7, 40)  # Reason
+        
     return output.getvalue()
+
 
 # ---- DOWNLOAD SECTIONS ----
 st.header("📥 Download Processed Files")
@@ -3112,7 +3378,7 @@ if df_shopify is not None:
         file_name = "shopify_date_columns_with_formulas_FIXED.xlsx"
     else:
         shopify_excel = convert_shopify_to_excel(export_df)
-        button_label = "📥 Download Processed Shopify File (Excel)"
+        button_label = "📥 Download admin Shopify File "
         file_name = "processed_shopify_merged.xlsx"
     
     st.download_button(
@@ -3132,15 +3398,7 @@ if campaign_files:
             df.to_excel(writer, index=False, sheet_name="Processed Data")
         return output.getvalue()
 
-    # Download processed campaign data (simple format)
-    if grouped_campaign is not None:
-        excel_data = convert_df_to_excel(grouped_campaign)
-        st.download_button(
-            label="📥 Download Processed Campaign File (Excel)",
-            data=excel_data,
-            file_name="processed_campaigns_merged.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+    
 
     # Download final campaign data (structured format like Shopify)
     if 'df_final_campaign' in locals() and not df_final_campaign.empty:
@@ -3151,8 +3409,8 @@ if campaign_files:
             button_label = "🎯 Download Campaign File with Date Columns & Excel Formulas (Excel)"
             file_name = "campaign_date_columns_with_formulas_FIXED.xlsx"
         else:
-            final_campaign_excel = convert_final_campaign_to_excel(df_final_campaign)
-            button_label = "🎯 Download Final Campaign File (Structured Excel)"
+            final_campaign_excel = convert_final_campaign_to_excel(df_final_campaign, selected_days=selected_days)
+            button_label = "🎯 Download admin Campaign File "
             file_name = "final_campaign_data_merged.xlsx"
         
         if final_campaign_excel:
@@ -3189,6 +3447,7 @@ if campaign_files or shopify_files or old_merged_files:
         unique_dates = df_shopify['Date'].unique()
         unique_dates = [str(d) for d in unique_dates if pd.notna(d) and str(d).strip() != '']
         st.info(f"📅 Found {len(unique_dates)} unique dates: {', '.join(sorted(unique_dates)[:5])}{'...' if len(unique_dates) > 5 else ''}")
+
 
 
 
