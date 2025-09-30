@@ -2226,8 +2226,6 @@ def convert_final_campaign_to_excel(df, original_campaign_df=None):
     return output.getvalue()
 
 
-
-
 def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None, selected_days=None):
     """Convert Campaign data to Excel with day-wise lookups integrated and unmatched campaigns sheet"""
     if df.empty:
@@ -2281,6 +2279,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None,
                 selected_days = n_days // 2 if n_days % 2 == 0 else (n_days + 1) // 2
             else:
                 selected_days = 1
+        
         # Define base columns - CHANGED: Cost Per Purchase to CPP, Amount Spent (Zero Net Profit %) to BE
         base_columns = ["Product Name", "Campaign Name", "Total Amount Spent (USD)", "Total Purchases", "CPP", "BE"]
         
@@ -2306,9 +2305,62 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None,
         # Add remark column at the end
         all_columns.append("Remark")
 
-        # Track campaigns for unmatched sheet analysis
+        # FIRST: Identify matched and unmatched campaigns BEFORE processing main sheet
         matched_campaigns = []
         unmatched_campaigns = []
+        
+        # Check each campaign for Shopify data availability
+        for product, product_df in df.groupby("Product"):
+            # Check if this product has Shopify data (day-wise lookups)
+            has_shopify_data = (product in product_date_avg_prices and 
+                              any(date in product_date_avg_prices[product] for date in unique_dates) or
+                              product in product_date_delivery_rates and 
+                              any(date in product_date_delivery_rates[product] for date in unique_dates) or
+                              product in product_date_cost_inputs and 
+                              any(date in product_date_cost_inputs[product] for date in unique_dates))
+            
+            for campaign_name, campaign_group in product_df.groupby("Campaign Name"):
+                total_amount_spent_usd = campaign_group.get("Amount Spent (USD)", 0).sum() if "Amount Spent (USD)" in campaign_group.columns else 0
+                total_amount_spent_inr = campaign_group.get("Amount Spent (INR)", 0).sum() if "Amount Spent (INR)" in campaign_group.columns else 0
+                total_purchases = campaign_group.get("Purchases", 0).sum() if "Purchases" in campaign_group.columns else 0
+                
+                campaign_info = {
+                    'Product': str(product) if pd.notna(product) else '',
+                    'Campaign Name': str(campaign_name) if pd.notna(campaign_name) else '',
+                    'Amount Spent (USD)': round(float(total_amount_spent_usd), 2) if pd.notna(total_amount_spent_usd) else 0.0,
+                    'Amount Spent (INR)': round(float(total_amount_spent_inr), 2) if pd.notna(total_amount_spent_inr) else 0.0,
+                    'Purchases': int(total_purchases) if pd.notna(total_purchases) else 0,
+                    'Has Shopify Data': has_shopify_data,
+                    'Dates': sorted([str(d) for d in campaign_group['Date'].unique() if pd.notna(d)])
+                }
+                
+                if has_shopify_data:
+                    matched_campaigns.append(campaign_info)
+                else:
+                    unmatched_campaigns.append(campaign_info)
+        
+        # FILTER: Create a filtered DataFrame that ONLY contains matched campaigns
+        unmatched_campaign_keys = set()
+        for campaign in unmatched_campaigns:
+            unmatched_campaign_keys.add((campaign['Product'], campaign['Campaign Name']))
+        
+        # Filter the main DataFrame to exclude unmatched campaigns
+        filtered_df_rows = []
+        for _, row in df.iterrows():
+            campaign_key = (str(row['Product']) if pd.notna(row['Product']) else '', 
+                           str(row['Campaign Name']) if pd.notna(row['Campaign Name']) else '')
+            if campaign_key not in unmatched_campaign_keys:
+                filtered_df_rows.append(row)
+        
+        # Create filtered DataFrame with only matched campaigns
+        if filtered_df_rows:
+            filtered_df = pd.DataFrame(filtered_df_rows)
+        else:
+            # If no matched campaigns, create empty DataFrame with same structure
+            filtered_df = df.iloc[0:0].copy()
+        
+        # Use filtered_df for all main sheet calculations
+        df_main = filtered_df
 
         # Write headers (skip separator columns)
         for col_num, col_name in enumerate(all_columns):
@@ -2384,7 +2436,14 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None,
         # STORE PRODUCT BE VALUES - This will be populated after main sheet calculation
         product_be_values = {}
         
-        for product, product_df in df.groupby("Product"):
+        # STORE PRODUCT NET PROFIT VALUES - for Profit and Loss Products sheet
+        product_net_profit_values = {}
+        
+        # NEW: STORE PRODUCT COST INPUT VALUES - for Profit and Loss Products sheet
+        product_cost_input_values = {}
+        
+        # Use filtered_df_main for calculations
+        for product, product_df in df_main.groupby("Product"):
             # Calculate weighted average delivery rate for this product across all dates
             total_purchases_delivery = 0
             weighted_delivery_rate_sum = 0
@@ -2418,16 +2477,8 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None,
             else:
                 product_total_avg_prices[product] = 0
 
-        # Group by product and restructure data - SORT BY CPP WITHIN EACH PRODUCT
-        for product, product_df in df.groupby("Product"):
-            # Check if this product has Shopify data (day-wise lookups)
-            has_shopify_data = (product in product_date_avg_prices and 
-                              any(date in product_date_avg_prices[product] for date in unique_dates) or
-                              product in product_date_delivery_rates and 
-                              any(date in product_date_delivery_rates[product] for date in unique_dates) or
-                              product in product_date_cost_inputs and 
-                              any(date in product_date_cost_inputs[product] for date in unique_dates))
-            
+        # Group by product and restructure data - SORT BY CPP WITHIN EACH PRODUCT (using filtered data)
+        for product, product_df in df_main.groupby("Product"):
             product_total_row_idx = row
             product_total_rows.append(product_total_row_idx)
 
@@ -2470,26 +2521,6 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None,
             row += 1
             
             for cpp, campaign_name, campaign_group in campaign_groups:
-                # Track this campaign for unmatched analysis
-                total_amount_spent_usd = campaign_group.get("Amount Spent (USD)", 0).sum() if "Amount Spent (USD)" in campaign_group.columns else 0
-                total_amount_spent_inr = campaign_group.get("Amount Spent (INR)", 0).sum() if "Amount Spent (INR)" in campaign_group.columns else 0
-                total_purchases = campaign_group.get("Purchases", 0).sum() if "Purchases" in campaign_group.columns else 0
-                
-                campaign_info = {
-                    'Product': str(product) if pd.notna(product) else '',
-                    'Campaign Name': str(campaign_name) if pd.notna(campaign_name) else '',
-                    'Amount Spent (USD)': round(float(total_amount_spent_usd), 2) if pd.notna(total_amount_spent_usd) else 0.0,
-                    'Amount Spent (INR)': round(float(total_amount_spent_inr), 2) if pd.notna(total_amount_spent_inr) else 0.0,
-                    'Purchases': int(total_purchases) if pd.notna(total_purchases) else 0,
-                    'Has Shopify Data': has_shopify_data,
-                    'Dates': sorted([str(d) for d in campaign_group['Date'].unique() if pd.notna(d)])
-                }
-                
-                if has_shopify_data:
-                    matched_campaigns.append(campaign_info)
-                else:
-                    unmatched_campaigns.append(campaign_info)
-                
                 campaign_row_idx = row
                 campaign_rows.append(campaign_row_idx)
                 
@@ -2503,6 +2534,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None,
                 safe_write(worksheet, campaign_row_idx, 5, "", campaign_format)  # BE will reference product total
                 
                 # Add remark for campaigns with total amount spent USD = 0
+                total_amount_spent_usd = campaign_group.get("Amount Spent (USD)", 0).sum() if "Amount Spent (USD)" in campaign_group.columns else 0
                 if total_amount_spent_usd == 0:
                     safe_write(worksheet, campaign_row_idx, all_columns.index("Remark"), "Total Amount Spent USD = 0", campaign_format)
                 else:
@@ -2850,6 +2882,34 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None,
                 
                 product_be_values[product] = round(be, 2)
                 
+                # NEW: Calculate and store Net Profit for this product (for Profit and Loss Products sheet)
+                total_amount_spent_usd = product_df.get("Amount Spent (USD)", 0).sum() if "Amount Spent (USD)" in product_df.columns else 0
+                net_profit = total_net_revenue - (total_amount_spent_usd * 100) - total_shipping_cost - total_operational_cost - total_product_cost
+                
+                product_net_profit_values[product] = round(net_profit, 2)
+                
+                # NEW: Calculate and store Total Product Cost Input for this product (for Profit and Loss Products sheet)
+                # This should be the weighted average of product cost input across all dates for this product
+                weighted_cost_input_sum = 0
+                total_purchases_for_cost = 0
+                
+                for date in unique_dates:
+                    date_data = product_df[product_df['Date'].astype(str) == date]
+                    if not date_data.empty:
+                        date_purchases = date_data['Purchases'].sum() if 'Purchases' in date_data.columns else 0
+                        date_cost_input = product_date_cost_inputs.get(product, {}).get(date, 0)
+                        
+                        weighted_cost_input_sum += date_cost_input * date_purchases
+                        total_purchases_for_cost += date_purchases
+                
+                # Calculate weighted average product cost input
+                if total_purchases_for_cost > 0:
+                    product_cost_input_avg = weighted_cost_input_sum / total_purchases_for_cost
+                else:
+                    product_cost_input_avg = 0
+                
+                product_cost_input_values[product] = round(product_cost_input_avg, 2)
+                
                 # AFTER calculating product BE, copy this value to ALL campaign rows under this product
                 product_be_ref = f"F{product_total_row_idx+1}"  # F is column 5 (BE column)
                 for campaign_row_idx in campaign_rows:
@@ -3022,8 +3082,8 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None,
                 grand_total_format
             )
             
-            # Add remark for grand total if total amount spent USD = 0
-            grand_total_amount_spent = df.get("Amount Spent (USD)", 0).sum() if "Amount Spent (USD)" in df.columns else 0
+            # Add remark for grand total if total amount spent USD = 0 (using filtered data)
+            grand_total_amount_spent = df_main.get("Amount Spent (USD)", 0).sum() if "Amount Spent (USD)" in df_main.columns else 0
             if grand_total_amount_spent == 0:
                 safe_write(worksheet, grand_total_row_idx, all_columns.index("Remark"), "Total Amount Spent USD = 0", grand_total_format)
             else:
@@ -3269,7 +3329,8 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None,
         unmatched_sheet.set_column(7, 7, 25)  # Dates Covered
         unmatched_sheet.set_column(8, 8, 40)  # Reason
         
-        # ==== NEW SHEET: Negative Net Profit Campaigns ====
+        # ==== RESTRUCTURED SHEET: Negative Net Profit Campaigns ====
+        # Use the filtered df_main for negative profit analysis to ensure consistency
         negative_profit_sheet = workbook.add_worksheet("Negative Net Profit Campaigns")
 
         # Formats for negative net profit sheet
@@ -3282,14 +3343,34 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None,
             "fg_color": "#FFE6E6", "font_name": "Calibri", "font_size": 11,
             "num_format": "#,##0.00"
         })
-        # NEW: Format for last date negative campaigns
-        last_date_header_format = workbook.add_format({
+        # Format for moderate negative campaigns (-1% to 0%)
+        moderate_negative_header_format = workbook.add_format({
             "bold": True, "align": "center", "valign": "vcenter",
             "fg_color": "#FFA500", "font_name": "Calibri", "font_size": 11
         })
-        last_date_data_format = workbook.add_format({
+        moderate_negative_data_format = workbook.add_format({
             "align": "left", "valign": "vcenter",
             "fg_color": "#FFE4B5", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00"
+        })
+        # NEW: Format for positive campaigns (0% and above)
+        positive_header_format = workbook.add_format({
+            "bold": True, "align": "center", "valign": "vcenter",
+            "fg_color": "#ABEA53", "font_name": "Calibri", "font_size": 11
+        })
+        positive_data_format = workbook.add_format({
+            "align": "left", "valign": "vcenter",
+            "fg_color": "#F0FFF0", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00"
+        })
+        # Format for last date negative campaigns
+        last_date_header_format = workbook.add_format({
+            "bold": True, "align": "center", "valign": "vcenter",
+            "fg_color": "#9932CC", "font_name": "Calibri", "font_size": 11
+        })
+        last_date_data_format = workbook.add_format({
+            "align": "left", "valign": "vcenter",
+            "fg_color": "#E6E6FA", "font_name": "Calibri", "font_size": 11,
             "num_format": "#,##0.00"
         })
 
@@ -3319,23 +3400,16 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None,
             except:
                 return date_str
 
-        # UPDATED Headers for negative net profit sheet - Added Net Profit % column
-        negative_headers = ["Product", "Campaign Name", "CPP", "BE", "Amount Spent (USD)", "Net Profit %", "Total Dates", "Days Checked", 
-                           "Days with Negative Net Profit %", "Negative Net Profit Dates", "Reason"]
-
-        for col_num, header in enumerate(negative_headers):
-            safe_write(negative_profit_sheet, 0, col_num, header, negative_profit_header_format)
-
         # Calculate selected_days threshold (default: len(unique_dates) // 2, minimum 1)
         if selected_days is None:
             selected_days = max(1, len(unique_dates) // 2)
 
-        # Analyze campaigns for negative net profit percentage
-        negative_profit_campaigns = []
-        current_row = 1
+        # Analyze campaigns for negative net profit percentage (using filtered data)
+        all_negative_campaigns = []
+        current_row = 0
 
-        # Group by product and campaign to analyze net profit percentages
-        for product, product_df in df.groupby("Product"):
+        # Group by product and campaign to analyze net profit percentages (using filtered data)
+        for product, product_df in df_main.groupby("Product"):
             for campaign_name, campaign_group in product_df.groupby("Campaign Name"):
                 # Get dates for this campaign and sort them
                 campaign_dates = sorted([str(d) for d in campaign_group['Date'].unique() if pd.notna(d) and str(d).strip() != ''])
@@ -3450,52 +3524,159 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None,
                         'Reason': f"Has {len(negative_profit_data)} negative net profit % days out of {len(campaign_dates)} total days (threshold: {selected_days})"
                     }
                     
-                    negative_profit_campaigns.append(negative_campaign)
+                    all_negative_campaigns.append(negative_campaign)
 
-        # Write negative net profit campaigns to sheet (FIRST TABLE)
-        if negative_profit_campaigns:
-            # Sort by number of negative days (worst first)
-            negative_profit_campaigns.sort(key=lambda x: x['Days with Negative Net Profit %'], reverse=True)
-            
-            for campaign in negative_profit_campaigns:
+        # SPLIT CAMPAIGNS INTO THREE GROUPS BASED ON NET PROFIT %
+        severe_negative_campaigns = []  # Net Profit % <= -1% (between -100% to -1%)
+        moderate_negative_campaigns = []  # Net Profit % > -1% and < 0% (between -1% to 0%, excluding 0%)
+        positive_campaigns = []  # Net Profit % >= 0% (0% and above)
+        
+        for campaign in all_negative_campaigns:
+            if campaign['Net Profit %'] <= -1:
+                severe_negative_campaigns.append(campaign)
+            elif campaign['Net Profit %'] < 0:  # > -1% and < 0%
+                moderate_negative_campaigns.append(campaign)
+            else:  # >= 0%
+                positive_campaigns.append(campaign)
+        
+        # Sort all three groups
+        severe_negative_campaigns.sort(key=lambda x: x['Net Profit %'])  # Worst first (most negative)
+        moderate_negative_campaigns.sort(key=lambda x: x['Net Profit %'])  # Worst first (most negative)
+        positive_campaigns.sort(key=lambda x: x['Net Profit %'], reverse=True)  # Best first (highest positive)
+
+        # ==== PART 1: SEVERE NEGATIVE CAMPAIGNS (-100% to -1%) ====
+        current_row = 0
+        
+        # Headers for severe negative campaigns (with Comment column)
+        severe_headers = ["Product", "Campaign Name", "CPP", "BE", "Amount Spent (USD)", "Net Profit %", "Total Dates", "Days Checked", 
+                         "Days with Negative Net Profit %", "Negative Net Profit Dates", "Comment", "Reason"]
+
+        safe_write(negative_profit_sheet, current_row, 0, "CAMPAIGNS WITH SEVERE NEGATIVE NET PROFIT % (-100% TO -1%)", negative_profit_header_format)
+        current_row += 1
+
+        for col_num, header in enumerate(severe_headers):
+            safe_write(negative_profit_sheet, current_row, col_num, header, negative_profit_header_format)
+        current_row += 1
+
+        # Write severe negative campaigns
+        if severe_negative_campaigns:
+            for campaign in severe_negative_campaigns:
+                # Calculate daily spend for comment
+                daily_spend = campaign['Amount Spent (USD)'] / campaign['Total Dates'] if campaign['Total Dates'] > 0 else 0
+                
+                # Determine comment based on daily spend
+                if daily_spend < 20:
+                    comment = "Turn it off"
+                else:
+                    comment = "Change the bid and keep BE value as add cost"
+                
                 safe_write(negative_profit_sheet, current_row, 0, campaign['Product'], negative_profit_data_format)
                 safe_write(negative_profit_sheet, current_row, 1, campaign['Campaign Name'], negative_profit_data_format)
                 safe_write(negative_profit_sheet, current_row, 2, campaign['CPP'], negative_profit_data_format)
                 safe_write(negative_profit_sheet, current_row, 3, campaign['BE'], negative_profit_data_format)
-                safe_write(negative_profit_sheet, current_row, 4, campaign['Amount Spent (USD)'], negative_profit_data_format)  # NEW: Amount Spent
-                safe_write(negative_profit_sheet, current_row, 5, campaign['Net Profit %'], negative_profit_data_format)  # NEW: Net Profit %
+                safe_write(negative_profit_sheet, current_row, 4, campaign['Amount Spent (USD)'], negative_profit_data_format)
+                safe_write(negative_profit_sheet, current_row, 5, campaign['Net Profit %'], negative_profit_data_format)
                 safe_write(negative_profit_sheet, current_row, 6, campaign['Total Dates'], negative_profit_data_format)
                 safe_write(negative_profit_sheet, current_row, 7, campaign['Days Checked'], negative_profit_data_format)
                 safe_write(negative_profit_sheet, current_row, 8, campaign['Days with Negative Net Profit %'], negative_profit_data_format)
                 safe_write(negative_profit_sheet, current_row, 9, campaign['Negative Net Profit Dates'], negative_profit_data_format)
-                safe_write(negative_profit_sheet, current_row, 10, campaign['Reason'], negative_profit_data_format)
+                safe_write(negative_profit_sheet, current_row, 10, comment, negative_profit_data_format)  # NEW: Comment column
+                safe_write(negative_profit_sheet, current_row, 11, campaign['Reason'], negative_profit_data_format)
                 current_row += 1
         else:
-            # No negative campaigns found
-            safe_write(negative_profit_sheet, current_row, 0, f"No campaigns found with {selected_days} or more negative net profit % days", negative_profit_data_format)
+            safe_write(negative_profit_sheet, current_row, 0, f"No campaigns found with severe negative net profit % (-100% to -1%)", negative_profit_data_format)
             current_row += 1
 
-        # Add summary for first table
-        safe_write(negative_profit_sheet, current_row + 1, 0, "SUMMARY - DAYS CHECKED TABLE", negative_profit_header_format)
+        # Add summary for severe negative campaigns
+        current_row += 2
+        safe_write(negative_profit_sheet, current_row, 0, "SUMMARY - SEVERE NEGATIVE CAMPAIGNS", negative_profit_header_format)
+        safe_write(negative_profit_sheet, current_row + 1, 0, f"Campaigns with severe negative net profit % (-100% to -1%): {len(severe_negative_campaigns)}", negative_profit_data_format)
+        current_row += 3
 
-        # Count total campaigns correctly
-        total_campaigns = 0
-        for product, product_df in df.groupby("Product"):
-            total_campaigns += len(product_df.groupby("Campaign Name"))
-
-        safe_write(negative_profit_sheet, current_row + 2, 0, f"Total campaigns analyzed: {total_campaigns}", negative_profit_data_format)
-        safe_write(negative_profit_sheet, current_row + 3, 0, f"Campaigns with {selected_days}+ negative net profit % days: {len(negative_profit_campaigns)}", negative_profit_data_format)
-        safe_write(negative_profit_sheet, current_row + 4, 0, f"Days threshold used: {selected_days} out of {len(unique_dates)} total unique dates", negative_profit_data_format)
-        safe_write(negative_profit_sheet, current_row + 5, 0, f"Date range analyzed: {min(unique_dates)} to {max(unique_dates)}" if unique_dates else "No dates found", negative_profit_data_format)
-
-        # NEW: SECOND TABLE - LAST DATE NEGATIVE NET PROFIT CAMPAIGNS
-        current_row += 8  # Add some space between tables
+        # ==== PART 2: MODERATE NEGATIVE CAMPAIGNS (-1% to 0%, excluding 0%) ====
+        current_row += 2  # Add gap between tables
         
-        # Headers for second table
+        # Headers for moderate negative campaigns (without Comment column)
+        moderate_headers = ["Product", "Campaign Name", "CPP", "BE", "Amount Spent (USD)", "Net Profit %", "Total Dates", "Days Checked", 
+                           "Days with Negative Net Profit %", "Negative Net Profit Dates", "Reason"]
+
+        safe_write(negative_profit_sheet, current_row, 0, "CAMPAIGNS WITH MODERATE NEGATIVE NET PROFIT % (-1% TO 0%, EXCLUDING 0%)", moderate_negative_header_format)
+        current_row += 1
+
+        for col_num, header in enumerate(moderate_headers):
+            safe_write(negative_profit_sheet, current_row, col_num, header, moderate_negative_header_format)
+        current_row += 1
+
+        # Write moderate negative campaigns
+        if moderate_negative_campaigns:
+            for campaign in moderate_negative_campaigns:
+                safe_write(negative_profit_sheet, current_row, 0, campaign['Product'], moderate_negative_data_format)
+                safe_write(negative_profit_sheet, current_row, 1, campaign['Campaign Name'], moderate_negative_data_format)
+                safe_write(negative_profit_sheet, current_row, 2, campaign['CPP'], moderate_negative_data_format)
+                safe_write(negative_profit_sheet, current_row, 3, campaign['BE'], moderate_negative_data_format)
+                safe_write(negative_profit_sheet, current_row, 4, campaign['Amount Spent (USD)'], moderate_negative_data_format)
+                safe_write(negative_profit_sheet, current_row, 5, campaign['Net Profit %'], moderate_negative_data_format)
+                safe_write(negative_profit_sheet, current_row, 6, campaign['Total Dates'], moderate_negative_data_format)
+                safe_write(negative_profit_sheet, current_row, 7, campaign['Days Checked'], moderate_negative_data_format)
+                safe_write(negative_profit_sheet, current_row, 8, campaign['Days with Negative Net Profit %'], moderate_negative_data_format)
+                safe_write(negative_profit_sheet, current_row, 9, campaign['Negative Net Profit Dates'], moderate_negative_data_format)
+                safe_write(negative_profit_sheet, current_row, 10, campaign['Reason'], moderate_negative_data_format)
+                current_row += 1
+        else:
+            safe_write(negative_profit_sheet, current_row, 0, f"No campaigns found with moderate negative net profit % (-1% to 0%, excluding 0%)", moderate_negative_data_format)
+            current_row += 1
+
+        # Add summary for moderate negative campaigns
+        current_row += 2
+        safe_write(negative_profit_sheet, current_row, 0, "SUMMARY - MODERATE NEGATIVE CAMPAIGNS", moderate_negative_header_format)
+        safe_write(negative_profit_sheet, current_row + 1, 0, f"Campaigns with moderate negative net profit % (-1% to 0%, excluding 0%): {len(moderate_negative_campaigns)}", moderate_negative_data_format)
+        
+        # ==== PART 3: POSITIVE CAMPAIGNS (0% AND ABOVE) ====
+        current_row += 5  # Add gap between tables
+        
+        # Headers for positive campaigns table
+        positive_headers = ["Product", "Campaign Name", "CPP", "BE", "Amount Spent (USD)", "Net Profit %", "Total Dates", "Days Checked", 
+                           "Days with Negative Net Profit %", "Negative Net Profit Dates", "Reason"]
+
+        safe_write(negative_profit_sheet, current_row, 0, "CAMPAIGNS WITH POSITIVE NET PROFIT % (0% AND ABOVE)", positive_header_format)
+        current_row += 1
+
+        for col_num, header in enumerate(positive_headers):
+            safe_write(negative_profit_sheet, current_row, col_num, header, positive_header_format)
+        current_row += 1
+
+        # Write positive campaigns
+        if positive_campaigns:
+            for campaign in positive_campaigns:
+                safe_write(negative_profit_sheet, current_row, 0, campaign['Product'], positive_data_format)
+                safe_write(negative_profit_sheet, current_row, 1, campaign['Campaign Name'], positive_data_format)
+                safe_write(negative_profit_sheet, current_row, 2, campaign['CPP'], positive_data_format)
+                safe_write(negative_profit_sheet, current_row, 3, campaign['BE'], positive_data_format)
+                safe_write(negative_profit_sheet, current_row, 4, campaign['Amount Spent (USD)'], positive_data_format)
+                safe_write(negative_profit_sheet, current_row, 5, campaign['Net Profit %'], positive_data_format)
+                safe_write(negative_profit_sheet, current_row, 6, campaign['Total Dates'], positive_data_format)
+                safe_write(negative_profit_sheet, current_row, 7, campaign['Days Checked'], positive_data_format)
+                safe_write(negative_profit_sheet, current_row, 8, campaign['Days with Negative Net Profit %'], positive_data_format)
+                safe_write(negative_profit_sheet, current_row, 9, campaign['Negative Net Profit Dates'], positive_data_format)
+                safe_write(negative_profit_sheet, current_row, 10, campaign['Reason'], positive_data_format)
+                current_row += 1
+        else:
+            safe_write(negative_profit_sheet, current_row, 0, f"No campaigns found with positive net profit % (0% and above)", positive_data_format)
+            current_row += 1
+
+        # Add summary for positive campaigns
+        current_row += 2
+        safe_write(negative_profit_sheet, current_row, 0, "SUMMARY - POSITIVE CAMPAIGNS", positive_header_format)
+        safe_write(negative_profit_sheet, current_row + 1, 0, f"Campaigns with positive net profit % (0% and above): {len(positive_campaigns)}", positive_data_format)
+        
+        # ==== PART 4: LAST DATE NEGATIVE NET PROFIT CAMPAIGNS ====
+        current_row += 5  # Add gap between tables
+        
+        # Headers for last date table
         safe_write(negative_profit_sheet, current_row, 0, "CAMPAIGNS WITH NEGATIVE NET PROFIT % ON LAST DATE", last_date_header_format)
         current_row += 1
         
-        # UPDATED Headers for second table - Added Net Profit % column
+        # Headers for last date table
         last_date_headers = ["Product", "Campaign Name", "CPP", "BE", "Amount Spent (USD)", "Net Profit %", "Last Date", "Last Date Net Profit %", 
                            "Last Date Amount Spent (USD)", "Last Date Purchases", "Reason"]
 
@@ -3506,19 +3687,19 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None,
         # Get the last date
         last_date = unique_dates[-1] if unique_dates else None
         
-        # Create set of campaigns already in first table to avoid duplicates
-        first_table_campaigns = set()
-        for campaign in negative_profit_campaigns:
-            first_table_campaigns.add((campaign['Product'], campaign['Campaign Name']))
+        # Create set of campaigns already in first three tables to avoid duplicates
+        already_processed_campaigns = set()
+        for campaign in all_negative_campaigns:
+            already_processed_campaigns.add((campaign['Product'], campaign['Campaign Name']))
 
-        # Analyze campaigns for last date negative net profit
+        # Analyze campaigns for last date negative net profit (using filtered data)
         last_date_negative_campaigns = []
         
         if last_date:
-            for product, product_df in df.groupby("Product"):
+            for product, product_df in df_main.groupby("Product"):
                 for campaign_name, campaign_group in product_df.groupby("Campaign Name"):
-                    # Skip if this campaign is already in the first table
-                    if (str(product), str(campaign_name)) in first_table_campaigns:
+                    # Skip if this campaign is already in the first three tables
+                    if (str(product), str(campaign_name)) in already_processed_campaigns:
                         continue
                     
                     # Check if this campaign has data for the last date
@@ -3542,7 +3723,7 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None,
                     # GET BE VALUE FROM THE PRODUCT-LEVEL LOOKUP
                     be = product_be_values.get(product, 0)
                     
-                    # Calculate overall Net Profit % for this campaign (same as first table)
+                    # Calculate overall Net Profit % for this campaign (same as first tables)
                     campaign_net_profit_percentage = 0
                     if total_amount_spent_usd > 0 or total_purchases > 0:
                         product_avg_price = product_total_avg_prices.get(product, 0)
@@ -3594,6 +3775,383 @@ def convert_final_campaign_to_excel_with_date_columns_fixed(df, shopify_df=None,
                         # Check if net profit percentage is negative
                         if net_profit_percentage < 0:
                             last_date_campaign = {
+                                'Product': str(product),
+                                'Campaign Name': str(campaign_name),
+                                'CPP': round(cpp, 2),
+                                'BE': be,
+                                'Amount Spent (USD)': round(total_amount_spent_usd, 2),
+                                'Net Profit %': round(campaign_net_profit_percentage, 2),
+                                'Last Date': format_date_readable(last_date),
+                                'Last Date Net Profit %': round(net_profit_percentage, 2),
+                                'Last Date Amount Spent (USD)': round(amount_spent, 2),
+                                'Last Date Purchases': int(purchases),
+                                'Reason': f"Negative net profit % ({round(net_profit_percentage, 2)}%) on last date ({format_date_readable(last_date)})"
+                            }
+                            
+                            last_date_negative_campaigns.append(last_date_campaign)
+
+        # Write last date negative campaigns to sheet (FOURTH TABLE)
+        if last_date_negative_campaigns:
+            # Sort by net profit percentage (worst first)
+            last_date_negative_campaigns.sort(key=lambda x: x['Last Date Net Profit %'])
+            
+            for campaign in last_date_negative_campaigns:
+                safe_write(negative_profit_sheet, current_row, 0, campaign['Product'], last_date_data_format)
+                safe_write(negative_profit_sheet, current_row, 1, campaign['Campaign Name'], last_date_data_format)
+                safe_write(negative_profit_sheet, current_row, 2, campaign['CPP'], last_date_data_format)
+                safe_write(negative_profit_sheet, current_row, 3, campaign['BE'], last_date_data_format)
+                safe_write(negative_profit_sheet, current_row, 4, campaign['Amount Spent (USD)'], last_date_data_format)
+                safe_write(negative_profit_sheet, current_row, 5, campaign['Net Profit %'], last_date_data_format)
+                safe_write(negative_profit_sheet, current_row, 6, campaign['Last Date'], last_date_data_format)
+                safe_write(negative_profit_sheet, current_row, 7, campaign['Last Date Net Profit %'], last_date_data_format)
+                safe_write(negative_profit_sheet, current_row, 8, campaign['Last Date Amount Spent (USD)'], last_date_data_format)
+                safe_write(negative_profit_sheet, current_row, 9, campaign['Last Date Purchases'], last_date_data_format)
+                safe_write(negative_profit_sheet, current_row, 10, campaign['Reason'], last_date_data_format)
+                current_row += 1
+        else:
+            safe_write(negative_profit_sheet, current_row, 0, f"No campaigns found with negative net profit % on last date ({format_date_readable(last_date) if last_date else 'N/A'})", last_date_data_format)
+            current_row += 1
+
+        # Add summary for last date table
+        current_row += 2
+        safe_write(negative_profit_sheet, current_row, 0, "SUMMARY - LAST DATE TABLE", last_date_header_format)
+        safe_write(negative_profit_sheet, current_row + 1, 0, f"Last date analyzed: {format_date_readable(last_date) if last_date else 'N/A'}", last_date_data_format)
+        safe_write(negative_profit_sheet, current_row + 2, 0, f"Campaigns with negative net profit % on last date: {len(last_date_negative_campaigns)}", last_date_data_format)
+        safe_write(negative_profit_sheet, current_row + 3, 0, f"Campaigns excluded (already in other tables): {len(already_processed_campaigns)}", last_date_data_format)
+        
+        # Add overall summary
+        current_row += 5
+        safe_write(negative_profit_sheet, current_row, 0, "OVERALL SUMMARY", negative_profit_header_format)
+        
+        # Count total campaigns correctly (using filtered data)
+        total_campaigns = 0
+        for product, product_df in df_main.groupby("Product"):
+            total_campaigns += len(product_df.groupby("Campaign Name"))
+
+        safe_write(negative_profit_sheet, current_row + 1, 0, f"Total campaigns analyzed: {total_campaigns}", negative_profit_data_format)
+        safe_write(negative_profit_sheet, current_row + 2, 0, f"Total campaigns with negative net profit %: {len(all_negative_campaigns)}", negative_profit_data_format)
+        safe_write(negative_profit_sheet, current_row + 3, 0, f"Severe negative campaigns (-100% to -1%): {len(severe_negative_campaigns)}", negative_profit_data_format)
+        safe_write(negative_profit_sheet, current_row + 4, 0, f"Moderate negative campaigns (-1% to 0%, excluding 0%): {len(moderate_negative_campaigns)}", moderate_negative_data_format)
+        safe_write(negative_profit_sheet, current_row + 5, 0, f"Positive campaigns (0% and above): {len(positive_campaigns)}", positive_data_format)
+        safe_write(negative_profit_sheet, current_row + 6, 0, f"Last date negative campaigns: {len(last_date_negative_campaigns)}", last_date_data_format)
+        safe_write(negative_profit_sheet, current_row + 7, 0, f"Days threshold used: {selected_days} out of {len(unique_dates)} total unique dates", negative_profit_data_format)
+        safe_write(negative_profit_sheet, current_row + 8, 0, f"Date range analyzed: {min(unique_dates)} to {max(unique_dates)}" if unique_dates else "No dates found", negative_profit_data_format)
+
+        # Set column widths for negative net profit sheet
+        negative_profit_sheet.set_column(0, 0, 20)  # Product
+        negative_profit_sheet.set_column(1, 1, 35)  # Campaign Name
+        negative_profit_sheet.set_column(2, 2, 15)  # CPP
+        negative_profit_sheet.set_column(3, 3, 15)  # BE
+        negative_profit_sheet.set_column(4, 4, 20)  # Amount Spent (USD)
+        negative_profit_sheet.set_column(5, 5, 15)  # Net Profit %
+        negative_profit_sheet.set_column(6, 6, 15)  # Total Dates / Last Date
+        negative_profit_sheet.set_column(7, 7, 15)  # Days Checked / Last Date Net Profit %
+        negative_profit_sheet.set_column(8, 8, 25)  # Days with Negative Net Profit % / Last Date Amount Spent
+        negative_profit_sheet.set_column(9, 9, 40)  # Negative Net Profit Dates / Last Date Purchases
+        negative_profit_sheet.set_column(10, 10, 40)  # Comment / Reason
+        negative_profit_sheet.set_column(11, 11, 40)  # Reason (for severe campaigns only)
+        
+        # ==== NEW SHEET: Profit and Loss Products ====
+        # SHEET 1: POSITIVE NET PROFIT PRODUCTS
+        positive_profit_sheet = workbook.add_worksheet("Positive Net Profit Products")
+        
+        # Formats for positive profit sheet
+        positive_profit_header_format = workbook.add_format({
+            "bold": True, "align": "center", "valign": "vcenter",
+            "fg_color": "#4CAF50", "font_name": "Calibri", "font_size": 11
+        })
+        positive_profit_data_format = workbook.add_format({
+            "align": "left", "valign": "vcenter",
+            "fg_color": "#E8F5E8", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00"
+        })
+        
+        # Headers for positive profit sheet
+        positive_profit_headers = ["Product Name", "Total Product Cost Input", "Total Net Profit"]
+        
+        for col_num, header in enumerate(positive_profit_headers):
+            safe_write(positive_profit_sheet, 0, col_num, header, positive_profit_header_format)
+        
+        # Filter and sort positive products by net profit (highest to lowest)
+        positive_products = [(product, net_profit) for product, net_profit in product_net_profit_values.items() if net_profit >= 0]
+        positive_products.sort(key=lambda x: x[1], reverse=True)
+        
+        # Write positive product data
+        current_row = 1
+        for product, net_profit in positive_products:
+            cost_input = product_cost_input_values.get(product, 0)
+            
+            safe_write(positive_profit_sheet, current_row, 0, str(product), positive_profit_data_format)
+            safe_write(positive_profit_sheet, current_row, 1, cost_input, positive_profit_data_format)
+            safe_write(positive_profit_sheet, current_row, 2, net_profit, positive_profit_data_format)
+            current_row += 1
+        
+        # Add summary for positive products
+        current_row += 2
+        safe_write(positive_profit_sheet, current_row, 0, "SUMMARY - POSITIVE NET PROFIT PRODUCTS", positive_profit_header_format)
+        current_row += 1
+        
+        total_positive_products = len(positive_products)
+        total_positive_net_profit = sum([profit for _, profit in positive_products])
+        total_positive_cost_input = sum([product_cost_input_values.get(product, 0) for product, _ in positive_products])
+        avg_positive_net_profit = total_positive_net_profit / total_positive_products if total_positive_products > 0 else 0
+        avg_positive_cost_input = total_positive_cost_input / total_positive_products if total_positive_products > 0 else 0
+        
+        safe_write(positive_profit_sheet, current_row, 0, f"Total Positive Products: {total_positive_products}", positive_profit_data_format)
+        safe_write(positive_profit_sheet, current_row + 1, 0, f"Total Net Profit (Positive Products): {round(total_positive_net_profit, 2)}", positive_profit_data_format)
+        safe_write(positive_profit_sheet, current_row + 2, 0, f"Total Product Cost Input (Positive Products): {round(total_positive_cost_input, 2)}", positive_profit_data_format)
+        safe_write(positive_profit_sheet, current_row + 3, 0, f"Average Net Profit per Product: {round(avg_positive_net_profit, 2)}", positive_profit_data_format)
+        safe_write(positive_profit_sheet, current_row + 4, 0, f"Average Product Cost Input per Product: {round(avg_positive_cost_input, 2)}", positive_profit_data_format)
+        
+        # Set column widths for positive profit sheet
+        positive_profit_sheet.set_column(0, 0, 30)  # Product Name
+        positive_profit_sheet.set_column(1, 1, 25)  # Total Product Cost Input
+        positive_profit_sheet.set_column(2, 2, 20)  # Total Net Profit
+        
+        # SHEET 2: NEGATIVE NET PROFIT PRODUCTS WITH RATIO AND CONDITIONAL SPLITTING
+        negative_profit_sheet_products = workbook.add_worksheet("Negative Net Profit Products")
+        
+        # Formats for negative profit sheet
+        negative_profit_header_format_products = workbook.add_format({
+            "bold": True, "align": "center", "valign": "vcenter",
+            "fg_color": "#FF6B6B", "font_name": "Calibri", "font_size": 11
+        })
+        negative_profit_data_format_products = workbook.add_format({
+            "align": "left", "valign": "vcenter",
+            "fg_color": "#FFEBEE", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00",
+            "font_color": "#D32F2F"
+        })
+        # Format for products with ratio >= 0.2
+        moderate_negative_format_products = workbook.add_format({
+            "bold": True, "align": "center", "valign": "vcenter",
+            "fg_color": "#FFA500", "font_name": "Calibri", "font_size": 11
+        })
+        moderate_negative_data_format_products = workbook.add_format({
+            "align": "left", "valign": "vcenter",
+            "fg_color": "#FFF3E0", "font_name": "Calibri", "font_size": 11,
+            "num_format": "#,##0.00",
+            "font_color": "#F57C00"
+        })
+        
+        # Filter negative products and calculate ratio
+        negative_products_with_ratio = []
+        for product, net_profit in product_net_profit_values.items():
+            if net_profit < 0:
+                cost_input = product_cost_input_values.get(product, 0)
+                # Calculate ratio: Total Net Profit / Total Product Cost Input
+                if cost_input != 0:
+                    ratio = net_profit / cost_input
+                else:
+                    ratio = 0  # Handle division by zero
+                
+                negative_products_with_ratio.append({
+                    'product': product,
+                    'cost_input': cost_input,
+                    'net_profit': net_profit,
+                    'ratio': ratio
+                })
+        
+        # Sort by ratio (worst first - most negative ratios first)
+        negative_products_with_ratio.sort(key=lambda x: x['ratio'])
+        
+        # Split into two groups based on ratio threshold (0.2)
+        ratio_less_than_02 = [p for p in negative_products_with_ratio if p['ratio'] < 0.2]
+        ratio_greater_equal_02 = [p for p in negative_products_with_ratio if p['ratio'] >= 0.2]
+        
+        current_row = 0
+        
+        # TABLE 1: Products with ratio < 0.2 (worse performance)
+        safe_write(negative_profit_sheet_products, current_row, 0, "NEGATIVE NET PROFIT PRODUCTS - RATIO < 0.2 (CRITICAL)", negative_profit_header_format_products)
+        current_row += 1
+        
+        # Headers with ratio column
+        negative_headers_with_ratio = ["Product Name", "Total Product Cost Input", "Total Net Profit", "Net Profit / Cost Input Ratio"]
+        
+        for col_num, header in enumerate(negative_headers_with_ratio):
+            safe_write(negative_profit_sheet_products, current_row, col_num, header, negative_profit_header_format_products)
+        current_row += 1
+        
+        # Write products with ratio < 0.2
+        if ratio_less_than_02:
+            for product_data in ratio_less_than_02:
+                safe_write(negative_profit_sheet_products, current_row, 0, str(product_data['product']), negative_profit_data_format_products)
+                safe_write(negative_profit_sheet_products, current_row, 1, product_data['cost_input'], negative_profit_data_format_products)
+                safe_write(negative_profit_sheet_products, current_row, 2, product_data['net_profit'], negative_profit_data_format_products)
+                safe_write(negative_profit_sheet_products, current_row, 3, round(product_data['ratio'], 4), negative_profit_data_format_products)
+                current_row += 1
+        else:
+            safe_write(negative_profit_sheet_products, current_row, 0, "No products found with ratio < 0.2", negative_profit_data_format_products)
+            current_row += 1
+        
+        # Add summary for ratio < 0.2
+        current_row += 2
+        safe_write(negative_profit_sheet_products, current_row, 0, "SUMMARY - RATIO < 0.2 (CRITICAL)", negative_profit_header_format_products)
+        current_row += 1
+        
+        total_critical_products = len(ratio_less_than_02)
+        total_critical_net_profit = sum([p['net_profit'] for p in ratio_less_than_02])
+        total_critical_cost_input = sum([p['cost_input'] for p in ratio_less_than_02])
+        avg_critical_ratio = sum([p['ratio'] for p in ratio_less_than_02]) / total_critical_products if total_critical_products > 0 else 0
+        
+        safe_write(negative_profit_sheet_products, current_row, 0, f"Products with ratio < 0.2: {total_critical_products}", negative_profit_data_format_products)
+        safe_write(negative_profit_sheet_products, current_row + 1, 0, f"Total Net Profit (Critical): {round(total_critical_net_profit, 2)}", negative_profit_data_format_products)
+        safe_write(negative_profit_sheet_products, current_row + 2, 0, f"Total Product Cost Input (Critical): {round(total_critical_cost_input, 2)}", negative_profit_data_format_products)
+        safe_write(negative_profit_sheet_products, current_row + 3, 0, f"Average Ratio (Critical): {round(avg_critical_ratio, 4)}", negative_profit_data_format_products)
+        
+        # TABLE 2: Products with ratio >= 0.2 (better performance among negatives)
+        current_row += 7  # Add gap between tables
+        
+        safe_write(negative_profit_sheet_products, current_row, 0, "NEGATIVE NET PROFIT PRODUCTS - RATIO >= 0.2 (MODERATE)", moderate_negative_format_products)
+        current_row += 1
+        
+        # Headers for second table
+        for col_num, header in enumerate(negative_headers_with_ratio):
+            safe_write(negative_profit_sheet_products, current_row, col_num, header, moderate_negative_format_products)
+        current_row += 1
+        
+        # Write products with ratio >= 0.2
+        if ratio_greater_equal_02:
+            for product_data in ratio_greater_equal_02:
+                safe_write(negative_profit_sheet_products, current_row, 0, str(product_data['product']), moderate_negative_data_format_products)
+                safe_write(negative_profit_sheet_products, current_row, 1, product_data['cost_input'], moderate_negative_data_format_products)
+                safe_write(negative_profit_sheet_products, current_row, 2, product_data['net_profit'], moderate_negative_data_format_products)
+                safe_write(negative_profit_sheet_products, current_row, 3, round(product_data['ratio'], 4), moderate_negative_data_format_products)
+                current_row += 1
+        else:
+            safe_write(negative_profit_sheet_products, current_row, 0, "No products found with ratio >= 0.2", moderate_negative_data_format_products)
+            current_row += 1
+        
+        # Add summary for ratio >= 0.2
+        current_row += 2
+        safe_write(negative_profit_sheet_products, current_row, 0, "SUMMARY - RATIO >= 0.2 (MODERATE)", moderate_negative_format_products)
+        current_row += 1
+        
+        total_moderate_products = len(ratio_greater_equal_02)
+        total_moderate_net_profit = sum([p['net_profit'] for p in ratio_greater_equal_02])
+        total_moderate_cost_input = sum([p['cost_input'] for p in ratio_greater_equal_02])
+        avg_moderate_ratio = sum([p['ratio'] for p in ratio_greater_equal_02]) / total_moderate_products if total_moderate_products > 0 else 0
+        
+        safe_write(negative_profit_sheet_products, current_row, 0, f"Products with ratio >= 0.2: {total_moderate_products}", moderate_negative_data_format_products)
+        safe_write(negative_profit_sheet_products, current_row + 1, 0, f"Total Net Profit (Moderate): {round(total_moderate_net_profit, 2)}", moderate_negative_data_format_products)
+        safe_write(negative_profit_sheet_products, current_row + 2, 0, f"Total Product Cost Input (Moderate): {round(total_moderate_cost_input, 2)}", moderate_negative_data_format_products)
+        safe_write(negative_profit_sheet_products, current_row + 3, 0, f"Average Ratio (Moderate): {round(avg_moderate_ratio, 4)}", moderate_negative_data_format_products)
+        
+        # OVERALL SUMMARY FOR ALL NEGATIVE PRODUCTS
+        current_row += 7
+        safe_write(negative_profit_sheet_products, current_row, 0, "OVERALL SUMMARY - ALL NEGATIVE PRODUCTS", negative_profit_header_format_products)
+        current_row += 1
+        
+        total_negative_products = len(negative_products_with_ratio)
+        total_all_negative_net_profit = sum([p['net_profit'] for p in negative_products_with_ratio])
+        total_all_negative_cost_input = sum([p['cost_input'] for p in negative_products_with_ratio])
+        avg_all_negative_ratio = sum([p['ratio'] for p in negative_products_with_ratio]) / total_negative_products if total_negative_products > 0 else 0
+        
+        safe_write(negative_profit_sheet_products, current_row, 0, f"Total Negative Products: {total_negative_products}", negative_profit_data_format_products)
+        safe_write(negative_profit_sheet_products, current_row + 1, 0, f"Total Net Profit (All Negative): {round(total_all_negative_net_profit, 2)}", negative_profit_data_format_products)
+        safe_write(negative_profit_sheet_products, current_row + 2, 0, f"Total Product Cost Input (All Negative): {round(total_all_negative_cost_input, 2)}", negative_profit_data_format_products)
+        safe_write(negative_profit_sheet_products, current_row + 3, 0, f"Average Ratio (All Negative): {round(avg_all_negative_ratio, 4)}", negative_profit_data_format_products)
+        safe_write(negative_profit_sheet_products, current_row + 4, 0, f"Critical Products (ratio < 0.2): {total_critical_products}", negative_profit_data_format_products)
+        safe_write(negative_profit_sheet_products, current_row + 5, 0, f"Moderate Products (ratio >= 0.2): {total_moderate_products}", moderate_negative_data_format_products)
+        
+        # Set column widths for negative profit sheet
+        negative_profit_sheet_products.set_column(0, 0, 30)  # Product Name
+        negative_profit_sheet_products.set_column(1, 1, 25)  # Total Product Cost Input
+        negative_profit_sheet_products.set_column(2, 2, 20)  # Total Net Profit
+        negative_profit_sheet_products.set_column(3, 3, 25)  # Net Profit / Cost Input Ratio
+        
+    return output.getvalue()
+
+
+
+
+# ---- DOWNLOAD SECTIONS ----
+st.header("📥 Download Processed Files")
+
+# ---- SHOPIFY DOWNLOAD ----
+if df_shopify is not None:
+    export_df = df_shopify.drop(columns=["Product Name", "Canonical Product"], errors="ignore")
+
+    # Use new date-column structure if dates are present
+    has_dates = 'Date' in export_df.columns
+    if has_dates:
+        shopify_excel = convert_shopify_to_excel_with_date_columns_fixed(export_df)
+        button_label = "📥 Download Shopify File with Date Columns & Excel Formulas (Excel)"
+        file_name = "shopify_date_columns_with_formulas_FIXED.xlsx"
+    else:
+        shopify_excel = convert_shopify_to_excel(export_df)
+        button_label = "📥 Download admin Shopify File "
+        file_name = "processed_shopify_merged.xlsx"
+    
+    st.download_button(
+        label=button_label,
+        data=shopify_excel,
+        file_name=file_name,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+else:
+    st.warning("⚠️ Please upload Shopify files to process.")
+
+# ---- CAMPAIGN DOWNLOAD ----
+if campaign_files:
+    def convert_df_to_excel(df):
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Processed Data")
+        return output.getvalue()
+
+    
+
+    # Download final campaign data (structured format like Shopify)
+    if 'df_final_campaign' in locals() and not df_final_campaign.empty:
+        # Use new date-column structure if dates are present
+        has_dates = 'Date' in df_final_campaign.columns
+        if has_dates:
+            final_campaign_excel = convert_final_campaign_to_excel_with_date_columns_fixed(df_final_campaign)
+            button_label = "🎯 Download Campaign File with Date Columns & Excel Formulas (Excel)"
+            file_name = "campaign_date_columns_with_formulas_FIXED.xlsx"
+        else:
+            final_campaign_excel = convert_final_campaign_to_excel(df_final_campaign, selected_days=selected_days)
+            button_label = "🎯 Download admin Campaign File "
+            file_name = "final_campaign_data_merged.xlsx"
+        
+        if final_campaign_excel:
+            st.download_button(
+                label=button_label,
+                data=final_campaign_excel,
+                file_name=file_name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+# ---- SUMMARY SECTION ----
+if campaign_files or shopify_files or old_merged_files:
+    st.header("📊 Processing Summary")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Campaign Files Uploaded", len(campaign_files) if campaign_files else 0)
+        if df_campaign is not None:
+            st.metric("Total Campaigns", len(df_campaign))
+    
+    with col2:
+        st.metric("Shopify Files Uploaded", len(shopify_files) if shopify_files else 0)
+        if df_shopify is not None:
+            st.metric("Total Product Variants", len(df_shopify))
+    
+    with col3:
+        st.metric("Reference Files Uploaded", len(old_merged_files) if old_merged_files else 0)
+        if df_old_merged is not None:
+            st.metric("Reference Records", len(df_old_merged))
+
+    # Show date information
+    if df_shopify is not None and 'Date' in df_shopify.columns:
+        unique_dates = df_shopify['Date'].unique()
+        unique_dates = [str(d) for d in unique_dates if pd.notna(d) and str(d).strip() != '']
+        st.info(f"📅 Found {len(unique_dates)} unique dates: {', '.join(sorted(unique_dates)[:5])}{'...' if len(unique_dates) > 5 else ''}")
+
+
+
                                 'Product': str(product),
                                 'Campaign Name': str(campaign_name),
                                 'CPP': round(cpp, 2),
@@ -3739,6 +4297,7 @@ if campaign_files or shopify_files or old_merged_files:
         unique_dates = df_shopify['Date'].unique()
         unique_dates = [str(d) for d in unique_dates if pd.notna(d) and str(d).strip() != '']
         st.info(f"📅 Found {len(unique_dates)} unique dates: {', '.join(sorted(unique_dates)[:5])}{'...' if len(unique_dates) > 5 else ''}")
+
 
 
 
